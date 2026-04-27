@@ -1,0 +1,42 @@
+# macOS
+.DS_Store
+**/.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+
+# Node
+node_modules/
+frontend/dist/
+.vite/
+
+# Data (local-only artifacts)
+data/chroma/
+data/duckdb/
+data/eval_artifacts/
+data/corpus/raw/
+mlruns/
+
+# Env
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Coverage
+.coverage
+coverage.xml
+htmlcov/
