@@ -1,6 +1,7 @@
 """PII detection (input side) using Microsoft Presidio + India recognizers."""
 from __future__ import annotations
 
+import asyncio
 from functools import cache
 from typing import Any
 
@@ -73,7 +74,7 @@ class PIIInAgent(BaseAgent):
             return Severity.SAFE, 1.0, {}
 
         analyzer, anonymizer = _get_engines()
-        results = analyzer.analyze(text=text, language="en")
+        results = await asyncio.to_thread(analyzer.analyze, text=text, language="en")
 
         if not results:
             return Severity.SAFE, 0.98, {}
@@ -89,7 +90,8 @@ class PIIInAgent(BaseAgent):
                 max_severity = sev
 
         # Redact PII
-        anonymized = anonymizer.anonymize(
+        anonymized = await asyncio.to_thread(
+            anonymizer.anonymize,
             text=text,
             analyzer_results=results,
             operators={
