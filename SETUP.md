@@ -386,7 +386,7 @@ On the **blocked path** (adversarial input), the sequence is `trace` → `blocke
 
 ## 9. Frontend setup
 
-The frontend is a Vite + React + TypeScript app in `frontend/`. It currently ships the dependency scaffold (Phase 0 / Phase 4 prep) and a placeholder index page. The eight production pages (Landing, Chat, Console, Causal Explorer, Replay, Eval, Deploy, Audit) land in Phase 4.
+The frontend is a Vite + React 18 + TypeScript app in `frontend/`. **Phase 4 is shipped:** all 8 pages are implemented (Landing, Chat, Console, Causal Explorer, Replay, Eval Bench, Deploy, Audit) with hand-rolled shadcn/ui primitives, IBM Plex typography, dark-first theme, app shell with collapsible sidebar + cmd+K palette.
 
 ```bash
 cd frontend
@@ -394,7 +394,32 @@ npm install
 npm run dev
 ```
 
-Default URL: `http://localhost:5173`. The CORS config in `backend/src/main.py` already allows `http://localhost:3000` and `http://localhost:5173`, so the frontend can call the backend without setup.
+Default URL: **`http://localhost:3000`** (vite is configured to use 3000, not the Vite default 5173). The CORS config in `backend/src/main.py` allows both ports.
+
+### 9.1 Page coverage
+
+| Route | Page | Status | Backend dependency |
+|---|---|---|---|
+| `/` | Landing — hero + animated agent constellation + arch diagram | shipped | none |
+| `/chat` | MedRAG Chat — split-pane conversation + governance trace + citation drawer | shipped, **live SSE** | `POST /api/medrag/chat` (requires `GROQ_API_KEY` for tokens) |
+| `/console` | Governance Console — ticker + virtualized feed + filter sheet + drawer | shipped, **mock data** | future `/api/v1/events` SSE |
+| `/causal` | Causal Explorer — 2D ReactFlow + 3D R3F + ranked causes + counterfactual playground | shipped, **mock data** | future `/api/v1/diagnose/{trace_id}/counterfactual` |
+| `/replay` | Decision Replay — timeline scrubber + decision card + alternative slider | shipped, **mock data** | future replay API |
+| `/eval` | Eval Bench — benchmark scoreboard + ablation card + latency chart | shipped, **mock data** | future eval API |
+| `/deploy` | Deploy / Settings — install tabs + agent toggle matrix + policy editor | shipped, **mock data** | future `/api/v1/config` |
+| `/audit` | Audit & Compliance — scorecard + filters + report generator | shipped, **mock data** | future `/api/v1/reports/audit` |
+
+The chat page is the only page wired to the live backend; the others use deterministic seeded mocks so screenshots and demos are reproducible.
+
+### 9.2 Build + lint
+
+```bash
+npm run build      # tsc -b && vite build → dist/ bundle
+npm run lint       # eslint . --max-warnings=0
+npm run format     # prettier --write src
+```
+
+Production bundle: ~1.25 MB JS / 375 kB gzip (main) + 956 kB / 268 kB gzip (CausalGraph3D, lazy-loaded only on `/causal` 3D toggle).
 
 Other npm scripts:
 
@@ -487,9 +512,10 @@ Each completed phase pushes a tag:
 git tag phase-1-complete   # → 2f13b2b (after Task 1.16)
 git tag phase-2-complete   # → 9c9652f (after Task 2.9)
 git tag phase-3-complete   # → 6bb5218 (after Task 3.7)
+git tag phase-4-complete   # → 3e9f125 (after Task 4.11)
 ```
 
-Phase 4+ will follow the same pattern.
+Phase 5+ will follow the same pattern.
 
 ---
 
@@ -586,7 +612,7 @@ guardian-ai/
 | Phase 1 | Core governance plane (7 agents + pipeline + decision + API + persistence) | `phase-1-complete` | 49 | 91% on `guardian/` |
 | Phase 2 | Causal Diagnosis Engine (DAG + interventions + estimation + ranking) | `phase-2-complete` | 65 cumulative | 97% on `guardian/causal/` |
 | Phase 3 | MedRAG demo (corpus, retrieval, streaming chat, sessions, feedback) | `phase-3-complete` | 81 cumulative | 94% on `medrag/` |
-| Phase 4 | Frontend (8 pages + 6 "wow" moments) | upcoming | – | – |
+| Phase 4 | Frontend (8 pages + foundation; mock data for 6 admin pages, live SSE on chat) | `phase-4-complete` | 81 (frontend untested) | – (Storybook + Playwright deferred) |
 | Phase 5 | Python SDK | upcoming | – | – |
 | Phase 6 | OpenAI-compatible HTTP proxy | upcoming | – | – |
 | Phase 7 | Evaluation harness (full benchmarks + paper figures) | upcoming | – | – |
