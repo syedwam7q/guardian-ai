@@ -5,7 +5,7 @@ import asyncio
 import time
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from src.guardian.agents.base import BaseAgent
 from src.guardian.agents.bias import BiasToxicityAgent
@@ -201,3 +201,83 @@ class GovernancePipeline:
                 session_id=request.session_id,
             )
         return resp
+
+    async def run_preflight(
+        self, *, user_input: str, domain: str = "medical"
+    ) -> tuple[bool, list[Verdict], UUID]:
+        """Run pre-flight stage only. Returns (blocked, pre_verdicts, trace_id)."""
+        trace_id = uuid4()
+        preflight_ctx = {"user_input": user_input, "domain": domain}
+        pre_verdicts = await self._run_parallel(self.preflight, preflight_ctx)
+        blocked = any(v.severity == Severity.BLOCK for v in pre_verdicts)
+        return blocked, list(pre_verdicts), trace_id
+
+    async def run_postflight(
+        self,
+        *,
+        output: str,
+        retrieved_docs: list[dict[str, Any]],
+        model: str,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        latency_ms: float = 0.0,
+        pre_verdicts: list[Verdict] | None = None,
+    ) -> tuple[list[Verdict], list[Violation], Decision | None]:
+        """Run post-flight + optional causal + optional decision.
+
+        ``pre_verdicts`` (if supplied) is folded into the violations list so the
+        decision engine sees the full picture.
+        """
+        postflight_ctx = {
+            "output": output,
+            "retrieved_docs": retrieved_docs,
+            "model": model,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "latency_ms": latency_ms,
+        }
+        post_verdicts = await self._run_parallel(self.postflight, postflight_ctx)
+
+        all_verdicts: list[Verdict] = list(pre_verdicts or []) + list(post_verdicts)
+        violations = [
+            Violation(
+                agent=v.agent,
+                severity=v.severity,
+                summary=f"{v.agent.value} flagged",
+                evidence=v.evidence,
+                confidence=v.confidence,
+            )
+            for v in all_verdicts
+            if v.severity > Severity.SAFE
+        ]
+
+        causal_attribution: list[dict[str, Any]] = []
+        decision: Decision | None = None
+        if violations and self.causal_engine is not None:
+            worst = max(violations, key=lambda v: v.severity)
+            diag = await self.causal_engine.diagnose(
+                baseline_trace={
+                    "model_params": {"temperature": 0.7, "top_p": 1.0},
+                    "model": model,
+                    "retrieved_docs": retrieved_docs,
+                },
+                baseline_violation_score=worst.confidence,
+                violation_summary=f"{worst.agent.value}: {worst.summary}",
+            )
+            causal_attribution = [
+                {
+                    "node": ce.node,
+                    "effect": ce.effect,
+                    "ci_low": ce.ci_low,
+                    "ci_high": ce.ci_high,
+                    "n_samples": ce.n_samples,
+                }
+                for ce in diag.ranked_causes
+            ]
+        if violations and self.decision_engine is not None:
+            decision = await self.decision_engine.decide(
+                violations=violations,
+                causal_attribution=causal_attribution,
+                similar_past=[],
+            )
+        return list(post_verdicts), violations, decision

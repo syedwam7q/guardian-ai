@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
 
 from src.api.routes.governance import router as governance_router
+from src.api.routes.medrag import router as medrag_router
 
 app = FastAPI(title="GuardianAI", version="0.1.0")
 app.add_middleware(
@@ -14,6 +15,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(governance_router)
+app.include_router(medrag_router)
 Instrumentator().instrument(app).expose(app)
 
 if __name__ == "__main__":
