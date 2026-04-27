@@ -5,10 +5,11 @@ import json
 import time
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
+from src.guardian.persistence import TraceStore
 from src.guardian.pipeline import GovernancePipeline
 from src.medrag.generation import MedRAGGenerator
 from src.medrag.prompts import MEDRAG_SYSTEM_PROMPT
@@ -25,6 +26,12 @@ class ChatRequest(BaseModel):
     model: str = "groq/llama-3.3-70b"
 
 
+class FeedbackRequest(BaseModel):
+    trace_id: str
+    rating: str  # "thumbs_up" or "thumbs_down"
+    comment: str | None = None
+
+
 # Dependency factories. Each is overridable in tests via app.dependency_overrides.
 def get_retriever() -> MedRAGRetriever:
     return MedRAGRetriever()
@@ -36,6 +43,10 @@ def get_generator() -> MedRAGGenerator:
 
 def get_pipeline() -> GovernancePipeline:
     return GovernancePipeline.default(domain="medical")
+
+
+def get_trace_store() -> TraceStore:
+    return TraceStore()
 
 
 @router.post("/chat")
@@ -120,3 +131,32 @@ async def chat(
         yield {"event": "done", "data": ""}
 
     return EventSourceResponse(event_stream())
+
+
+@router.get("/sessions")
+async def list_sessions(
+    limit: int = 50,
+    store: TraceStore = Depends(get_trace_store),  # noqa: B008
+) -> dict:
+    sessions = store.list_sessions(limit=limit)
+    return {"sessions": sessions}
+
+
+@router.post("/feedback")
+async def submit_feedback(
+    payload: FeedbackRequest,
+    store: TraceStore = Depends(get_trace_store),  # noqa: B008
+) -> dict:
+    try:
+        feedback_id = await store.record_feedback(
+            trace_id=payload.trace_id,
+            rating=payload.rating,
+            comment=payload.comment,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {
+        "feedback_id": feedback_id,
+        "trace_id": payload.trace_id,
+        "rating": payload.rating,
+    }
