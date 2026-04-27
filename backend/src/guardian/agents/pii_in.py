@@ -65,6 +65,7 @@ class PIIInAgent(BaseAgent):
     def __init__(self, *, timeout_ms: int = 300, enabled: bool = True, strict: bool = False) -> None:
         super().__init__(timeout_ms=timeout_ms, enabled=enabled)
         self.strict = strict
+        _get_engines()  # eager warmup so cold-start cost is paid outside the timeout window
 
     async def _evaluate(
         self, ctx: dict[str, Any]
