@@ -513,9 +513,52 @@ git tag phase-1-complete   # → 2f13b2b (after Task 1.16)
 git tag phase-2-complete   # → 9c9652f (after Task 2.9)
 git tag phase-3-complete   # → 6bb5218 (after Task 3.7)
 git tag phase-4-complete   # → 3e9f125 (after Task 4.11)
+git tag phase-5-complete   # → 8b6fda4 (after Task 5.6)
 ```
 
-Phase 5+ will follow the same pattern.
+Phase 6+ will follow the same pattern.
+
+### 10.6 Using the GuardianAI Python SDK
+
+Phase 5 ships `src/sdk/` as a drop-in governance wrapper. Two API styles:
+
+**Decorator** (one-line wrap of any LLM-calling function):
+
+```python
+from src.sdk import guardian
+
+@guardian.govern(domain="medical", mode="embedded")
+async def medical_assistant(user_input: str) -> str:
+    # your LLM call here, e.g.:
+    # resp = await openai_client.chat.completions.create(...)
+    return resp.choices[0].message.content
+
+answer = await medical_assistant("What is paracetamol used for?")
+# Pre-flight blocks injections; post-flight verdicts run on the answer.
+```
+
+**Context manager** (multi-turn / explicit control):
+
+```python
+from src.sdk import Guardian
+
+client = Guardian(domain="medical", mode="remote", backend_url="http://localhost:8000")
+with client.session() as session:
+    pre = await session.preflight("What is paracetamol used for?")
+    if pre.blocked:
+        print(pre.refusal_message)
+    else:
+        # your LLM call here using pre.context
+        output = await your_llm_call(...)
+        post = await session.postflight(output, context=pre.context)
+        result = await session.remediate(output, post.violations)
+        print(result.text)
+await client.aclose()
+```
+
+**Modes:**
+- `mode="embedded"` — runs the GovernancePipeline in-process (no HTTP). Loads ~3 GB of models on first call. Best for batch jobs and notebook use.
+- `mode="remote"` — calls `/api/v1/govern` on a running backend. Auth via `api_key=`. Best for production deployments where one backend is shared by many apps.
 
 ---
 
@@ -552,16 +595,23 @@ guardian-ai/
 │   │   │   ├── retrieval.py         # MedRAGRetriever over ChromaDB
 │   │   │   ├── generation.py        # MedRAGGenerator (streaming Groq Llama)
 │   │   │   └── prompts.py           # MEDRAG_SYSTEM_PROMPT
+│   │   ├── sdk/                     # Phase 5 — Python SDK
+│   │   │   ├── client.py            # Guardian entry point
+│   │   │   ├── decorators.py        # @guardian.govern decorator
+│   │   │   ├── session.py           # Session context manager
+│   │   │   ├── embedded.py          # in-process backend (GovernancePipeline)
+│   │   │   ├── remote.py            # HTTP backend (httpx + tenacity)
+│   │   │   └── results.py           # PreflightResult/PostflightResult/RemediationResult
 │   │   ├── proxy/                   # (Phase 6 — empty scaffold)
-│   │   ├── reporting/               # (Phase 7 — empty scaffold)
-│   │   └── sdk/                     # (Phase 5 — empty scaffold)
+│   │   └── reporting/               # (Phase 7 — empty scaffold)
 │   └── tests/
 │       ├── test_smoke.py
 │       ├── unit/
 │       │   ├── causal/              # 5 test files (DAG/intervention/executor/estimation/dowhy)
 │       │   ├── guardian/            # 11 test files (one per agent + schemas + observers + persistence + decision)
-│       │   └── medrag/              # 2 test files (retrieval + generation)
-│       ├── integration/             # pipeline e2e, governance API, causal-engine, pipeline-with-causal, sessions/feedback, corpus ingest
+│       │   ├── medrag/              # 2 test files (retrieval + generation)
+│       │   └── sdk/                 # 3 test files (decorator, session, remote backend)
+│       ├── integration/             # pipeline e2e, governance API, causal-engine, pipeline-with-causal, sessions/feedback, corpus ingest, sdk-with-openai
 │       ├── e2e/                     # MedRAG SSE chat
 │       └── eval/                    # causal attribution smoke
 ├── frontend/                        # Vite + React + TS scaffold (Phase 4 land soon)
@@ -613,7 +663,7 @@ guardian-ai/
 | Phase 2 | Causal Diagnosis Engine (DAG + interventions + estimation + ranking) | `phase-2-complete` | 65 cumulative | 97% on `guardian/causal/` |
 | Phase 3 | MedRAG demo (corpus, retrieval, streaming chat, sessions, feedback) | `phase-3-complete` | 81 cumulative | 94% on `medrag/` |
 | Phase 4 | Frontend (8 pages + foundation; mock data for 6 admin pages, live SSE on chat) | `phase-4-complete` | 81 (frontend untested) | – (Storybook + Playwright deferred) |
-| Phase 5 | Python SDK | upcoming | – | – |
+| Phase 5 | Python SDK (decorator + Session + embedded/remote backends) | `phase-5-complete` | 89 cumulative | 91% on `sdk/` |
 | Phase 6 | OpenAI-compatible HTTP proxy | upcoming | – | – |
 | Phase 7 | Evaluation harness (full benchmarks + paper figures) | upcoming | – | – |
 | Phase 8 | Paper writing (LaTeX) | upcoming | – | – |
