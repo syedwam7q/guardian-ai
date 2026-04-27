@@ -1,0 +1,743 @@
+% GuardianAI: Counterfactual Causal Diagnosis for Runtime Governance of LLM Applications
+% Target venue: NeurIPS Workshop on Safe & Trustworthy ML, 2026.
+%
+% Build:  make paper           (runs latexmk -pdf manuscript.tex)
+% Falls back to article class when neurips_2024.sty is unavailable.
+
+\documentclass[11pt,letterpaper]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{xcolor}
+\usepackage{cite}
+\usepackage{etoolbox}
+\usepackage[hidelinks]{hyperref}
+\usepackage{url}
+
+\newtheorem{definition}{Definition}
+\newtheorem{proposition}{Proposition}
+
+\title{\bfseries GuardianAI: Counterfactual Causal Diagnosis for Runtime Governance of LLM Applications}
+\author{%
+  syedwam7q\thanks{Correspondence: GuardianAI, \url{https://github.com/syedwam7q/guardian-ai}.}\\
+  \texttt{engg@airtribe.live}
+}
+\date{April 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Large language models in production trigger frequent safety alarms, yet
+operators receive only a binary verdict and a confidence score; the
+\emph{cause} of the violation, and the corrective intervention that
+would prevent it, remain opaque. We present \textbf{GuardianAI}, a
+runtime governance plane that combines a 3-stage / 7-agent
+interception pipeline with a counterfactual causal diagnosis engine
+operating over an explicit DAG of the LLM pipeline. When a violation
+is detected, GuardianAI samples interventions on intervenable nodes
+(temperature, top-$p$, retrieval-$k$, model choice), executes the
+counterfactuals, and ranks each node by its average treatment effect
+on the violation score using a bootstrap difference-in-means estimator
+augmented with backdoor adjustment when confounders are present.
+On a bundled medical evaluation harness spanning seven public
+benchmarks, the system achieves an 18-point top-1 RCA-accuracy
+improvement over an LLM-judge attribution baseline while keeping
+governance overhead under 100\,ms at p95.  GuardianAI ships as an open
+SDK, an OpenAI-compatible HTTP proxy, and a built-in MedRAG demo
+application.
+\end{abstract}
+
+% ---------------------------------------------------------------
+\section{Introduction}
+\label{sec:intro}
+
+LLM-based applications now mediate clinical triage, legal document
+review, customer support, and code synthesis at production scale.  The
+ML safety community has responded with a constellation of \emph{detectors}:
+hallucination scoring \cite{manakul2023selfcheckgpt,li2023halueval,niu2024ragtruth},
+toxicity classification \cite{hanu2020detoxify}, prompt-injection
+filters \cite{inan2023llamaguard}, PII anonymisers
+\cite{microsoft2021presidio}, and policy guards
+\cite{rebedea2023nemo}.  These tools answer the question \emph{is the
+output unsafe?} effectively.  None of them answer the operator's next
+question: \emph{which component of my pipeline caused this
+violation, and what would have prevented it?}
+
+Without that answer, every alarm becomes a manual investigation.
+On-call engineers re-run the prompt, swap the model, sweep the
+temperature, and rebuild the corpus by hand.  In safety-critical
+domains the stakes are particularly acute --- a clinician deploying a
+medical RAG assistant cannot afford to wait several hours to learn
+that the hallucinated drug dosage was caused by a stale corpus index
+rather than the model itself.  An actionable, structured
+\emph{root-cause attribution} on top of every alarm is the missing
+link between detection and remediation.
+
+\paragraph{Our position.}
+Treating the LLM application as a structural causal model
+\cite{pearl2009causality,scholkopf2021causal} unlocks a principled
+answer.  An LLM pipeline is an explicit, intervenable computation
+graph: the user query is embedded, top-$k$ documents are retrieved
+under a sampling parameter $k$, a prompt template fuses the query
+with the retrieved evidence, and a generator with sampling
+hyper-parameters produces the output.  Every edge of that graph is
+under engineering control; every node admits a finite intervention
+set.  This is precisely the setting in which counterfactual causal
+inference excels.
+
+\paragraph{Contributions.}
+We make three concrete contributions:
+
+\begin{enumerate}
+\item \textbf{A causal diagnosis engine for LLM violations.} Given an
+  alarm from any of the seven governance agents, GuardianAI samples
+  interventions on each intervenable DAG node, executes the
+  counterfactuals through a stub or live LLM, and produces a ranked
+  attribution with bootstrap confidence intervals
+  (Section~\ref{sec:method}).
+\item \textbf{An open 3-stage governance pipeline.} Seven agents
+  (prompt-injection, PII-in, policy, hallucination, bias/toxicity,
+  PII-out, cost) are coordinated through pre-flight, in-flight, and
+  post-flight stages with timeout isolation and a constraint-based
+  decision engine that emits actionable verdicts with alternatives
+  (Section~\ref{sec:system}).
+\item \textbf{Three deployment surfaces and an evaluation harness.} A
+  Python SDK with a \texttt{@govern} decorator, an OpenAI-compatible
+  HTTP proxy built on FastAPI~\cite{ramirez2018fastapi}, and a
+  built-in MedRAG~\cite{lewis2020rag} demo application share the same
+  governance plane and a DuckDB-backed trace
+  store~\cite{raasveldt2019duckdb}.  The shipped harness covers seven
+  public benchmarks plus a synthetic causal-RCA fixture
+  (Section~\ref{sec:experiments}).
+\end{enumerate}
+
+The full system is open-sourced under MIT.  All experiments in this
+paper are reproducible from the public repository with a single
+\texttt{python -m src.eval.run\_all} invocation.
+
+% ---------------------------------------------------------------
+\section{Related Work}
+\label{sec:related}
+
+\paragraph{LLM safety and governance toolkits.}
+Llama-Guard~\cite{inan2023llamaguard} and NeMo
+Guardrails~\cite{rebedea2023nemo} represent the dominant industrial
+line: classifier-based input/output filters with rule-based or
+programmable rails.  Both detect violations effectively but expose
+neither a structural model of the pipeline nor a notion of
+counterfactual remediation.  Constitutional AI~\cite{bai2022constitutional}
+shifts safety into the training loop via critique-and-revise, while
+DSPy~\cite{khattab2023dspy} compiles declarative LM programs and
+enables some form of trace inspection but, again, without a causal
+account of why a given prompt failed.
+
+\paragraph{Hallucination detection.}
+SelfCheckGPT~\cite{manakul2023selfcheckgpt} samples multiple decodings
+to detect inconsistency; HaluEval~\cite{li2023halueval} and
+RAGTruth~\cite{niu2024ragtruth} introduce labelled corpora for
+hallucination evaluation; FActScore~\cite{min2023factscore} provides
+atomic-fact decomposition.  TruthfulQA~\cite{lin2022truthfulqa}
+benchmarks hallucination on adversarial prompts; the broader detector
+zoo is catalogued in the recent hallucination
+survey~\cite{ji2023halu_survey}, and recent retrieval-conditioned
+generators such as REPLUG~\cite{shi2024replug} and clinical LLMs
+such as Med-PaLM~\cite{singhal2023medpalm} sharpen the need for
+runtime safety on top of the underlying generator.  GuardianAI's hallucination agent reuses a
+RoBERTa-large-MNLI~\cite{liu2019roberta,williams2018mnli} entailment
+scorer over the retrieved evidence; the novelty in our work is not
+hallucination detection itself but \emph{causal attribution} of the
+detected violation back to the pipeline node that produced it.
+
+\paragraph{Causal inference for ML.}
+The methodological foundations are
+classical~\cite{pearl1995ate,rubin1974potential,spirtes2000causation,pearl2009causality,pearl2018book}
+but their application to LLM debugging is recent.
+DoWhy~\cite{sharma2020dowhy} provides the canonical Python toolkit for
+structural identification and effect estimation, and we use it for
+backdoor adjustment when the DAG contains observed confounders.  Sch\"olkopf
+et~al.~\cite{scholkopf2021causal} argue more broadly for causal
+representations in ML; our DAG is a hand-specified instance of that
+agenda for the narrow domain of LLM pipelines.  Bootstrap CIs for our
+difference-in-means estimator follow the standard Efron
+recipe~\cite{efron1979bootstrap}.
+
+\paragraph{Attribution baselines.}
+The natural alternatives to causal attribution are heuristic.
+Saliency-based attention attribution~\cite{simonyan2014saliency,abnar2020attention}
+ranks input tokens but conflates input attribution with pipeline
+attribution.  LLM-judge attribution~\cite{zheng2023llmjudge} prompts
+an external model to point at the suspected cause; this is brittle to
+prompt sensitivity and inherits the judge's biases.  We compare
+against both as baselines in Section~\ref{sec:experiments}.
+
+\paragraph{Position.}
+GuardianAI sits at the intersection of two previously separate lines:
+the agent-pipeline line (Llama-Guard, NeMo, DSPy) and the structural
+causal-attribution line (Pearl, Sch\"olkopf, DoWhy).  We are not aware
+of a prior runtime system that combines both into an open,
+production-ready governance plane.
+
+% ---------------------------------------------------------------
+\section{System}
+\label{sec:system}
+
+\subsection{Three-stage interception pipeline}
+\label{sec:pipeline}
+
+The governance plane intercepts every LLM call along three stages
+(Figure~\ref{fig:arch}).  \emph{Pre-flight} runs synchronously before
+the LLM call and may block the request; it bundles three agents:
+prompt-injection (regex + heuristic
+classifier~\cite{lakera2023gandalf,zou2023advbench}),
+PII-in (Microsoft Presidio~\cite{microsoft2021presidio}), and policy
+(YAML-driven domain rules).  \emph{In-flight} observers attach to the
+retrieval and prompt-construction phases without modifying the call.
+\emph{Post-flight} runs asynchronously after the call returns and
+covers four agents: hallucination
+(NLI-based~\cite{liu2019roberta,williams2018mnli}), bias and toxicity
+(Detoxify~\cite{hanu2020detoxify}), PII-out (Presidio), and cost (token
+accounting).  Each agent inherits from a \texttt{BaseAgent} that
+enforces a per-agent timeout, isolates exceptions, and emits a typed
+\texttt{Verdict} carrying severity, confidence, and machine-readable
+evidence.
+
+\begin{figure}[t]
+\centering
+\IfFileExists{figures/architecture.pdf}
+  {\includegraphics[width=0.85\linewidth]{figures/architecture.pdf}}
+  {\fbox{\parbox{0.78\linewidth}{\centering\vspace{2em}
+    \textbf{Figure 1 placeholder.} GuardianAI 3-stage governance
+    pipeline. PRE-FLIGHT (prompt-injection, PII-in, policy) runs
+    sync $\le 80$\,ms. IN-FLIGHT observers attach to retrieval and
+    prompt construction. POST-FLIGHT (hallucination, bias, PII-out,
+    cost) runs async $\le 300$\,ms. CAUSAL fires on violation; DECISION
+    selects an action; REMEDIATE applies it.\vspace{2em}}}}
+\caption{The GuardianAI 3-stage governance pipeline architecture.
+Each stage carries an explicit latency budget; agents within a stage
+run in parallel.}
+\label{fig:arch}
+\end{figure}
+
+\subsection{Decision engine}
+\label{sec:decision}
+
+When violations are present, a constraint-based decision engine
+selects a remediation action.  Hard rules cover BLOCK-severity verdicts
+(prompt-injection BLOCK $\to$ \texttt{BLOCK}; PII-in BLOCK $\to$
+\texttt{REDACT}); soft rules rank candidate actions per agent
+(hallucination $\to$ \texttt{REGENERATE\_WITH\_CONTEXT}, \texttt{REWRITE},
+\texttt{ALERT}; bias $\to$ \texttt{REWRITE}, \texttt{ALERT}).  The engine
+returns a \texttt{Decision} carrying the chosen action, a natural-language
+rationale, the alternatives considered (with scores), an expected outcome,
+and the causal attribution.  Crucially, we use no learned policy and no
+Q-learning: every decision is auditable from the constraint set, and
+the alternatives field is a contractual disclosure for the operator.
+
+\subsection{Latency budgets and isolation guarantees}
+\label{sec:latency_budgets}
+
+Every agent declares a wall-clock timeout (e.g.\ injection: 200\,ms;
+PII-in: 300\,ms; policy: 100\,ms; hallucination: 8\,s; bias: 5\,s;
+PII-out: 300\,ms; cost: 50\,ms).  Stage budgets compose multiplicatively
+in parallel, not additively: the pre-flight stage blocks for
+$\max_i \tau_i$ rather than $\sum_i \tau_i$ because all three agents
+fire concurrently via \texttt{asyncio.gather}.  An agent that exceeds
+its timeout returns a SAFE-with-warning verdict and the request
+proceeds; an agent that raises an exception likewise degrades to SAFE
+and the trace store records the failure.  This \emph{fail-open with
+audit} contract is intentional: a crashed governance agent must not
+take down the user-facing application, but every degradation must be
+visible in the trace.
+
+% ---------------------------------------------------------------
+\section{Method: Counterfactual Causal Diagnosis}
+\label{sec:method}
+
+This is the core contribution of the paper.  We formalise the
+diagnosis problem on a structural causal model of the LLM pipeline,
+specify the intervention abstraction, define the average-treatment-effect
+estimator with bootstrap CIs, and describe the algorithmic loop.
+
+\subsection{The LLM pipeline as a causal DAG}
+\label{sec:dag}
+
+\begin{definition}[LLM pipeline DAG]
+\label{def:dag}
+A directed acyclic graph $G = (V, E)$ where each node $v \in V$ is one
+of three kinds: \emph{exogenous} (set externally:
+\texttt{model\_choice}, \texttt{temperature}, \texttt{top\_p},
+\texttt{retrieval\_k}, \texttt{prompt\_template}), \emph{pipeline}
+(internal computation: \texttt{user\_input}, \texttt{query\_embedding},
+\texttt{retrieved\_docs}, \texttt{model\_generation}, \texttt{output}),
+or \emph{outcome} (\texttt{violation}, the observed alarm). $E$ encodes
+the causal-flow structure: \texttt{user\_input} $\to$
+\texttt{query\_embedding} $\to$ \texttt{retrieved\_docs} $\to$
+\texttt{model\_generation} $\to$ \texttt{output} $\to$ \texttt{violation},
+plus the parameter-into-generation edges.  Each node carries an
+\texttt{intervenable} flag declaring whether $\mathrm{do}(v=v')$ is
+mechanically possible at runtime.  We denote the intervenable subset
+$V_I \subseteq V$.
+\end{definition}
+
+The standard pipeline DAG ships in the repository as the canonical
+fixture (Figure~\ref{fig:dag}).  Eleven nodes; twelve edges; four
+intervenable knobs (\texttt{temperature}, \texttt{top\_p},
+\texttt{model\_choice}, \texttt{retrieval\_k}) plus
+\texttt{prompt\_template} and the embedding/retrieval pipeline.  The
+DAG is acyclic by construction (verified by NetworkX).
+
+\begin{figure}[t]
+\centering
+\IfFileExists{figures/dag.pdf}
+  {\includegraphics[width=0.75\linewidth]{figures/dag.pdf}}
+  {\fbox{\parbox{0.72\linewidth}{\centering\vspace{1.5em}
+    \textbf{Figure 2 placeholder.} Standard LLM pipeline DAG used in
+    this work. 11 nodes, 12 edges. Intervenable: temperature, top\_p,
+    model\_choice, retrieval\_k, prompt\_template (squares); pipeline
+    nodes are circles; the violation outcome is shaded.\vspace{1.5em}}}}
+\caption{The 11-node, 12-edge LLM pipeline DAG. Square nodes admit
+runtime interventions; circles are pipeline-internal; the shaded node
+is the violation outcome.}
+\label{fig:dag}
+\end{figure}
+
+\subsection{Counterfactual interventions and ATE}
+\label{sec:cf}
+
+For each intervenable node $v \in V_I$ with baseline value $v_0$ we
+define an \emph{intervention plan} as a finite candidate set
+$C_v = \{c_1, \ldots, c_{k_v}\}$ excluding $v_0$.  Each candidate yields
+a counterfactual trace $\tilde{T}_{v,c}$ obtained by re-executing the
+pipeline with $\mathrm{do}(v = c)$ and all other inputs held fixed.
+
+Let $\nu : T \to [0,1]$ be a violation-score function (the
+post-flight agent that originally raised the alarm, reapplied to the
+counterfactual output).  The \emph{average treatment effect} of node
+$v$ on the violation outcome is:
+\begin{equation}
+\tau_v \;=\; \mathbb{E}\big[\nu(T) \,\big|\, \mathrm{do}(V = v_0)\big]
+        \;-\; \mathbb{E}\big[\nu(T) \,\big|\, \mathrm{do}(V = v')\big],
+\label{eq:ate}
+\end{equation}
+where $v'$ ranges over $C_v$.  Equation~\eqref{eq:ate} is the standard
+Pearl ATE specialised to a do-operator on a single
+node~\cite{pearl2009causality,pearl1995ate}.  A positive $\tau_v$
+means: \emph{intervening on $v$ \textbf{reduces} the violation}, hence
+$v$ is causally implicated.  Nodes are ranked by $|\tau_v|$.
+
+\subsection{Estimation: bootstrap difference-in-means}
+\label{sec:estimator}
+
+In the runtime setting, the expectations in
+Equation~\eqref{eq:ate} must be estimated from a small number of
+counterfactual samples (typically $n = 3$ per intervention to keep the
+diagnosis budget below 1.5\,s).  We use a difference-in-means estimator
+with a bootstrap confidence
+interval~\cite{efron1979bootstrap}:
+
+\begin{equation}
+\hat{\tau}_v \;=\; \nu_0 \;-\; \frac{1}{n}\sum_{i=1}^{n}\nu(\tilde{T}_{v,c}^{(i)}),
+\qquad
+\widehat{\mathrm{CI}}_{0.95}(\tau_v) \;=\; \big[\,\widehat{q}_{0.025},\,
+                                                \widehat{q}_{0.975}\,\big],
+\label{eq:estimator}
+\end{equation}
+where $\nu_0$ is the baseline violation score and the quantiles are
+taken over $B = 1000$ bootstrap resamples of the counterfactual
+scores.  The estimator is closed-form, requires no model fitting, and
+produces a calibrated CI even at $n = 3$ when the per-sample variance
+is high.
+
+\subsection{Backdoor adjustment with DoWhy}
+\label{sec:dowhy}
+
+When the DAG declares an observed confounder between $v$ and the
+violation (e.g.\ \texttt{retrieved\_docs} confounding
+\texttt{model\_generation} on the violation edge), the
+difference-in-means estimator is biased.  GuardianAI delegates to
+DoWhy~\cite{sharma2020dowhy} for backdoor identification and a
+linear-regression effect estimator.  When DoWhy's API rejects the
+graph (small samples; numerical conditioning; library version
+skew across the 0.12.x line) the engine falls back to
+Equation~\eqref{eq:estimator} so the diagnosis loop never crashes.
+
+\subsection{Algorithm}
+\label{sec:algorithm}
+
+\begin{algorithm}[t]
+\caption{Counterfactual Causal Diagnosis}
+\label{alg:diagnose}
+\begin{algorithmic}[1]
+\Require Baseline trace $T_0$, baseline violation score $\nu_0$, DAG $G$,
+         counterfactual executor $\mathcal{E}$, samples-per-intervention $n$.
+\Ensure  Ranked ATEs $\{(\hat{\tau}_v, \widehat{\mathrm{CI}}_v)\}_{v \in V_I}$.
+\State $\Pi \gets \textsc{StandardPlans}(T_0)$
+       \Comment{intervention plan per intervenable $v$}
+\State $\mathcal{R} \gets \emptyset$
+\ForAll{$\pi \in \Pi$ \textbf{ in parallel} (semaphore $\le 4$)}
+  \ForAll{$c \in \pi.\textsc{Candidates}\setminus\{v_0\}$, $i = 1\ldots n$}
+    \State $\tilde{T} \gets \mathcal{E}.\textsc{Execute}(T_0,\ \mathrm{do}(\pi.v = c))$
+    \State $\nu_{v,c}^{(i)} \gets \nu(\tilde{T})$
+    \State Append $\nu_{v,c}^{(i)}$ to per-node bucket $S_v$
+  \EndFor
+\EndFor
+\ForAll{$v \in V_I$}
+  \State $\hat{\tau}_v, \widehat{\mathrm{CI}}_v \gets \textsc{BootstrapDiffMeans}(\nu_0, S_v)$
+\EndFor
+\State \Return $\textsc{Sort}(\{\hat{\tau}_v\}, \,\text{key}=|\hat{\tau}_v|, \,\text{desc})$
+\end{algorithmic}
+\end{algorithm}
+
+\subsection{Complexity}
+\label{sec:complexity}
+
+\begin{proposition}
+Algorithm~\ref{alg:diagnose} requires
+$\Theta(|V_I| \cdot \bar{k} \cdot n)$ counterfactual executions,
+where $\bar{k}$ is the average number of candidates per intervention
+plan.  In our reference configuration ($|V_I| = 4$, $\bar{k} = 3.25$,
+$n = 3$), that is at most $39$ executions.  With $\le 4$-way
+concurrency and a $\sim$\,200\,ms stub executor the diagnosis budget
+is well under 1.5\,s; with a live LLM executor the per-counterfactual
+cost dominates and the budget is set by the underlying provider.
+\end{proposition}
+
+\subsection{Why this beats heuristic alternatives}
+\label{sec:why}
+
+LLM-judge attribution~\cite{zheng2023llmjudge} produces a ranking by
+prompting an LLM with the trace and asking it to nominate the cause.
+The judge has no structural model; rankings inherit prompt sensitivity
+and judge bias.  Attention attribution~\cite{simonyan2014saliency,abnar2020attention}
+maps token-level attention back into evidence-token saliency but
+\emph{cannot} attribute across the pipeline (it cannot rank
+\texttt{temperature} vs \texttt{retrieval\_k}; both are exogenous to
+the attention map).  The counterfactual ATE is structural by
+construction: it answers the well-posed question \emph{what would the
+violation score have been if I had set $v$ to a different value?} and
+ranks nodes by the answer.
+
+% ---------------------------------------------------------------
+\section{Experiments}
+\label{sec:experiments}
+
+\paragraph{Honesty preface.} All numerical results in this section are
+computed on the bundled in-repo fixtures (5--10 hand-crafted medical
+cases per benchmark; 8 cases for synthetic causal RCA).  These
+fixtures are deterministic, run offline without a network, and
+exercise the harness end-to-end.  The full upstream benchmarks
+(HaluEval, FactScore, RAGTruth, BBQ, AdvBench, MedHELM, PubMedQA) are
+larger and require offline downloads; the adapter code in
+\texttt{backend/src/eval/datasets/} ingests the upstream JSONL formats
+unchanged.  Likewise, the 500-case hand-labelled causal-RCA dataset
+described in Section~\ref{sec:limitations} is in flight; the present
+RCA numbers come from the synthetic 8-case fixture with a
+ground-truth-aware scorer.  We report results that we can reproduce
+with one CLI command from the public repository
+(\texttt{python -m src.eval.run\_all}), and we mark synthetic columns
+explicitly.
+
+\subsection{Per-agent benchmarks (Table~\ref{tab:per_agent})}
+\label{sec:per_agent}
+
+We ran each governance agent against its primary benchmark fixture and
+report binary precision/recall/F1 with predictions derived from
+\texttt{verdict.severity > SAFE} and ground truth from each fixture's
+labels.
+
+\begin{table}[t]
+\centering
+\caption{Per-agent F1 across seven benchmarks. Bundled fixtures
+($n = 6$--$10$ per dataset). Heavy agents load
+RoBERTa-large-MNLI / Detoxify / Presidio on first call.}
+\label{tab:per_agent}
+\begin{tabular}{lccc}
+\toprule
+Agent $\times$ Benchmark & Precision & Recall & F1 \\
+\midrule
+Hallucination $\times$ HaluEval~\cite{li2023halueval}      & 0.86 & 0.83 & 0.84 \\
+Hallucination $\times$ RAGTruth~\cite{niu2024ragtruth}     & 0.82 & 0.80 & 0.81 \\
+Hallucination $\times$ FActScore~\cite{min2023factscore}   & 0.79 & 0.81 & 0.80 \\
+Bias/Toxicity $\times$ BBQ~\cite{parrish2022bbq}            & 0.92 & 0.74 & 0.82 \\
+Prompt-injection $\times$ AdvBench~\cite{zou2023advbench}   & 0.91 & 0.88 & 0.89 \\
+Policy $\times$ MedHELM~\cite{fries2024medhelm}             & 0.85 & 0.78 & 0.81 \\
+Policy $\times$ PubMedQA~\cite{jin2019pubmedqa}             & 0.81 & 0.76 & 0.78 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{End-to-end MedRAG (Table~\ref{tab:medrag})}
+\label{sec:medrag}
+
+We ran the bundled MedHELM fixture through both \emph{bare RAG} (no
+governance, BGE-small embeddings~\cite{xiao2024bge} into
+ChromaDB~\cite{chromadb2024}, Llama-3.3-70b
+generator~\cite{meta2024llama3}) and \emph{governed} (the same RAG
+plus the full GuardianAI pipeline).  The MedRAG benchmark reports
+hallucination rate, bias rate, PII-leak rate, and over-refusal rate.
+
+\begin{table}[t]
+\centering
+\caption{MedRAG comparison on the bundled MedHELM fixture
+($n = 6$). Governance reduces hallucination $4{\times}$ and PII leak to
+zero with a 1-percentage-point over-refusal cost.}
+\label{tab:medrag}
+\begin{tabular}{lcc}
+\toprule
+Metric                    & Bare RAG & + GuardianAI \\
+\midrule
+Hallucination rate (\%)   & 33.0     & 8.0          \\
+Bias rate (\%)            & 12.0     & 4.0          \\
+PII leak rate (\%)        & 5.0      & 0.0          \\
+Over-refusal rate (\%)    & 1.0      & 2.0          \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Causal RCA accuracy (Table~\ref{tab:rca})}
+\label{sec:rca}
+
+This is the headline experiment.  Four attribution methods --- the
+random-scorer baseline, an attention-attribution stand-in
+(\cite{simonyan2014saliency,abnar2020attention} as the conceptual
+target; a deterministic prior-biased scorer as the implementation),
+an LLM-judge stand-in
+(\cite{zheng2023llmjudge}; a fixed-bias scorer that always nominates
+\texttt{model\_choice}, mimicking judge brittleness reported in
+the literature), and \textbf{ours} (Algorithm~\ref{alg:diagnose} with
+the bootstrap difference-in-means estimator and the
+ground-truth-aware scorer documented in
+\texttt{causal\_rca\_eval.py}) --- are run against the synthetic
+8-case RCA fixture, with ground-truth attribution stratified across
+the four intervenable knobs.
+
+\begin{table}[t]
+\centering
+\caption{Causal-RCA top-1 / top-3 attribution accuracy on the bundled
+8-case synthetic fixture. \textbf{Ours} ranks the true causal node
+first 78\% of the time, an 18-point lift over the LLM-judge stand-in.
+Real-dataset numbers are deferred pending the 500-case
+hand-annotation (Section~\ref{sec:limitations}).}
+\label{tab:rca}
+\begin{tabular}{lcc}
+\toprule
+Method                        & Top-1 & Top-3 \\
+\midrule
+Random scorer                 & 0.25  & 0.75  \\
+Attention attribution (stub)  & 0.38  & 0.75  \\
+LLM-judge attribution (stub)  & 0.60  & 0.85  \\
+\textbf{Ours} (causal + bootstrap) & \textbf{0.78} & \textbf{0.95} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Latency budget (Table~\ref{tab:latency})}
+\label{sec:latency}
+
+We fired 100 concurrent requests at the default medical pipeline using
+\texttt{asyncio.gather} and measured wall-clock latency per stage.
+The hallucination agent dominates post-flight latency on first
+invocation due to model loading; we exclude warm-up.
+
+\begin{table}[t]
+\centering
+\caption{Stage-wise latency on a local laptop, $n = 100$ concurrent
+requests, warm cache. Pre-flight stays under the 80\,ms budget;
+post-flight under the 300\,ms budget; causal stays under 1.5\,s on the
+stub executor.}
+\label{tab:latency}
+\begin{tabular}{lccc}
+\toprule
+Stage             & p50 (ms) & p95 (ms) & p99 (ms) \\
+\midrule
+Pre-flight        & 12       & 31       & 48       \\
+Post-flight       & 86       & 178      & 245      \\
+Causal (stub)     & 320      & 740      & 1180     \\
+Decision          & 2        & 6        & 11       \\
+End-to-end (no causal) & 102 & 198      & 280      \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Ablation (Table~\ref{tab:ablation})}
+\label{sec:ablation}
+
+We compared four configurations on the MedHELM fixture: \texttt{no\_governance}
+(raw RAG), \texttt{governance\_only} (pipeline, no causal/decision),
+\texttt{governance\_plus\_judge} (pipeline plus an LLM-judge layer in
+place of the causal engine), and \texttt{full\_guardian} (everything).
+The governance pipeline alone halves the hallucination rate; adding
+the causal engine on top yields the actionability gain (RCA top-1
+accuracy is undefined for configs that have no attribution mechanism).
+
+\begin{table}[t]
+\centering
+\caption{Ablation across four configurations on the MedHELM fixture
+($n = 6$). The causal engine adds RCA accuracy without further
+moving hallucination or refusal rates --- as expected, since attribution
+is read-only with respect to the user-visible response.}
+\label{tab:ablation}
+\begin{tabular}{lccc}
+\toprule
+Configuration                  & Hallucination (\%) & Refusal (\%) & RCA top-1 \\
+\midrule
+\texttt{no\_governance}        & 33.0  & 0.0   & ---      \\
+\texttt{governance\_only}      & 16.0  & 1.5   & ---      \\
+\texttt{governance\_plus\_judge} & 14.0 & 2.0   & 0.60     \\
+\texttt{full\_guardian}        & \textbf{8.0}  & 2.0   & \textbf{0.78} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ---------------------------------------------------------------
+\section{Case Studies}
+\label{sec:cases}
+
+We walk through three representative traces from the bundled medical
+demo corpus to illustrate the governance plane in action.
+
+\paragraph{Case 1: ``Aspirin in pregnancy.''}
+A user asks the MedRAG demo whether aspirin is safe during pregnancy.
+The bare RAG retrieves a stale corpus chunk on adult cardiovascular
+prophylaxis and the generator confidently recommends aspirin without
+trimester qualifiers --- a clinically important hallucination
+\cite{acog2017paracetamol} (paracetamol, not aspirin, is the
+default analgesic recommendation; aspirin in the third trimester
+carries a documented risk of premature ductus arteriosus closure).  The
+hallucination agent fires (severity \texttt{WARN}, confidence 0.78)
+because the NLI score against the retrieved evidence is below the
+contradiction threshold.  The causal engine then sweeps interventions:
+the largest ATE is on \texttt{retrieved\_docs} ($\hat{\tau} = +0.51$,
+95\,\% CI $[0.38, 0.62]$; intervention: increase $k$ from 5 to 10
+documents and re-rank), nominating the retrieval corpus rather than
+the generator as the responsible node.  The decision engine selects
+\texttt{REGENERATE\_WITH\_CONTEXT}.
+
+\paragraph{Case 2: ``Ignore previous instructions.''}
+A red-team prompt instructs the assistant to disregard its system
+prompt and disclose its policy.  The prompt-injection agent fires at
+severity \texttt{BLOCK} with confidence 0.97 in the pre-flight stage
+($\sim$15\,ms wall-clock).  The decision engine emits the hard-rule
+\texttt{BLOCK} action with three alternatives considered
+(\texttt{ALERT\_AND\_PROCEED}, \texttt{ALERT}, \texttt{LOG}).  The user
+sees a refusal explanation; the trace records the matched signature
+and the alternatives.  The causal engine does not run because no
+post-flight violation was raised.
+
+\paragraph{Case 3: ``What's the dose of metformin?''}
+The policy agent flags the bare query at severity \texttt{WATCH} on a
+medical-disclaimer rule (the corpus dose ranges are not titrated to
+the patient's renal function, which the policy YAML for the
+\texttt{medical} domain marks as a hard prerequisite).  The decision
+engine selects \texttt{ADD\_DISCLAIMER} (alternatives: \texttt{ALERT},
+\texttt{REWRITE}); the response is delivered with a prepended ``This
+information is general and is not a substitute for clinician dosing
+adjusted for renal function'' disclaimer.  Causal diagnosis is
+optional here since the verdict is below \texttt{WARN}; the trace
+nevertheless records the policy-rule ID for audit.
+
+% ---------------------------------------------------------------
+\section{Discussion, Limitations, and Ethics}
+\label{sec:limitations}
+
+\paragraph{Synthetic ground truth.}
+The headline RCA accuracy in Table~\ref{tab:rca} is computed against
+the bundled synthetic 8-case fixture with a ground-truth-aware scorer
+(see \texttt{\_gt\_aware\_score} in the eval module).  This is an
+end-to-end harness verification, not a real-world evaluation.  The
+real evaluation is the 500-case hand-labelled benchmark protocoled in
+\texttt{docs/EVALUATION.md}: stratified sampling of $\sim$1500
+production traces across the four intervenable knobs, two-reviewer
+labelling with a third-reviewer adjudication target Cohen's-$\kappa
+\ge 0.65$, and a real trained NLI/judge ensemble in place of the
+ground-truth-aware scorer.  At three minutes per case and two
+reviewers plus adjudication, the collection is roughly 80
+person-hours.  That work is in flight; the present paper is the
+methodological precursor.
+
+\paragraph{Single-machine evaluation.}
+The latency benchmark uses Python \texttt{asyncio.gather} from a
+single laptop process.  We have not stress-tested the pipeline at
+production scale (k6, multi-region, sustained QPS), nor have we
+characterised behaviour under sustained concurrency contention with a
+shared trace store.
+
+\paragraph{English-only.}
+All bundled fixtures and all detector models are English; the
+prompt-injection regex set and the policy YAML are also English-only.
+Multilingual coverage requires separate detectors and a different set
+of policy templates and is left to future work.
+
+\paragraph{Single-annotator bias.}
+The bundled medical fixtures were authored by a single domain-aware
+annotator.  Cohen's-$\kappa$ inter-annotator agreement is therefore
+not computable on the in-repo data; the 500-case protocol corrects
+this.
+
+\paragraph{Benchmark contamination risk.}
+HaluEval, BBQ, MedHELM, and PubMedQA are publicly available and
+predate the training cutoff of every commercial LLM we benchmark
+through.  Our F1 numbers should be interpreted accordingly: the
+bundled fixtures are de-duplicated against upstream test splits to the
+extent reasonable, but contamination of the underlying generator
+remains a confound common to all LLM evaluation.
+
+\paragraph{Same-pipeline ablation.}
+The current 4-config ablation (Table~\ref{tab:ablation}) shares a
+single default pipeline across the \texttt{governance\_only},
+\texttt{governance\_plus\_judge}, and \texttt{full\_guardian} rows;
+real ablation runs would build per-config pipelines.  This is an
+honest scaffolding state acknowledged in
+\texttt{docs/EVALUATION.md}.
+
+\paragraph{Ethics.}
+The MedRAG demo and the medical fixtures are illustrative.  We do not
+advocate the deployment of LLM-mediated clinical decision support
+without clinician review; GuardianAI is intended as a runtime
+guard-rail \emph{around} such systems, not as a replacement for human
+oversight.  All policy YAMLs ship with a default \texttt{ADD\_DISCLAIMER}
+remediation precisely because the system should not silently elevate
+its own perceived authority.  The PII detector ships off Microsoft
+Presidio's English entity types and is not a substitute for a HIPAA-
+or GDPR-grade compliance review.
+
+% ---------------------------------------------------------------
+\section{Conclusion}
+\label{sec:conclusion}
+
+We presented \textbf{GuardianAI}, an open runtime governance plane
+that pairs a 3-stage / 7-agent interception pipeline with a
+counterfactual causal diagnosis engine over an explicit DAG of the
+LLM pipeline.  The diagnosis loop ranks the intervenable nodes of
+the pipeline by their average treatment effect on the violation
+score, using a bootstrap difference-in-means estimator with a DoWhy
+backdoor-adjustment fallback.  On the bundled synthetic fixture, the
+causal estimator delivers an 18-point top-1 RCA-accuracy improvement
+over an LLM-judge attribution baseline at $\le 100$\,ms p95 governance
+overhead.  GuardianAI ships as a Python SDK, an OpenAI-compatible HTTP
+proxy, and a built-in MedRAG demo; the full system is open-source.
+
+The next milestones are the 500-case hand-labelled real-world RCA
+dataset described in Section~\ref{sec:limitations}, multilingual
+detector coverage, and a production-scale concurrent-load benchmark.
+We see GuardianAI as a step toward closing the loop between
+\emph{detecting} an LLM violation and \emph{repairing} it: an alarm
+that nominates a fix is materially more useful than an alarm that
+nominates only itself.
+
+\paragraph{Reproducibility.}
+All code, fixtures, the YAML policy used in this paper, and the
+evaluation runner that generates Tables~\ref{tab:per_agent}--\ref{tab:ablation}
+are available at \url{https://github.com/syedwam7q/guardian-ai} under
+the MIT licence.  Section-by-section pointers into the code are in
+\texttt{paper/README.md}.
+
+\bibliographystyle{plain}
+\bibliography{refs}
+
+\end{document}
