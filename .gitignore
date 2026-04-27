@@ -29,6 +29,7 @@ frontend/vite.config.d.ts
 data/chroma/
 data/duckdb/
 data/eval_artifacts/
+data/eval-results/
 data/corpus/raw/
 mlruns/
 
