@@ -1,0 +1,61 @@
+# Build context exclusions for Docker images.
+# Keep this aligned with .gitignore but tighter — we do NOT want
+# any local artifacts shipped into the image.
+
+# VCS
+.git
+.github
+.gitignore
+
+# Python
+**/__pycache__
+**/*.py[cod]
+**/*$py.class
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+**/.venv
+**/venv
+**/*.egg-info
+**/build
+**/dist
+
+# Node / Vite
+**/node_modules
+frontend/dist
+**/.vite
+**/*.tsbuildinfo
+
+# Local data — Chroma + DuckDB are huge and per-environment. Mount via volumes.
+data/chroma
+data/duckdb
+data/eval_artifacts
+data/eval-results
+data/corpus/raw
+
+# Editor / OS
+.DS_Store
+**/.DS_Store
+.vscode
+.idea
+*.swp
+
+# Coverage
+.coverage
+coverage.xml
+htmlcov
+
+# Local secrets — never bake into an image
+.env
+.env.local
+.env.*.local
+
+# Docs / paper / mlruns aren't needed at runtime
+paper/*.aux
+paper/*.log
+paper/*.out
+paper/*.bbl
+paper/*.blg
+paper/*.toc
+paper/*.synctex.gz
+mlruns

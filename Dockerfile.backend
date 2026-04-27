@@ -1,0 +1,56 @@
+# GuardianAI backend — multi-stage Python 3.11 image
+# Stage 1: build a virtualenv with all deps + spaCy model
+FROM python:3.11-slim AS builder
+
+ENV PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+# Build deps for any wheels that compile from source (chromadb / tokenizers)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        gcc \
+        g++ \
+        git \
+        curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Install backend deps into a venv we will copy into the runtime stage
+COPY backend/pyproject.toml ./backend/pyproject.toml
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+RUN pip install --upgrade pip setuptools wheel \
+    && pip install -e ./backend \
+    && python -m spacy download en_core_web_lg
+
+# ---- runtime ----
+FROM python:3.11-slim AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PATH="/opt/venv/bin:$PATH" \
+    HF_HOME=/root/.cache/huggingface \
+    SENTENCE_TRANSFORMERS_HOME=/root/.cache/huggingface
+
+# Runtime deps only — curl for healthcheck, libgomp for torch CPU
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl \
+        libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY --from=builder /opt/venv /opt/venv
+COPY backend ./backend
+COPY data ./data
+
+WORKDIR /app/backend
+
+EXPOSE 8000
+
+# Heavy ML weights (sentence-transformers, NLI, Detoxify) download lazily
+# on first request. spaCy model is already baked in.
+CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000"]

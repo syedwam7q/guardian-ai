@@ -1,0 +1,78 @@
+# GuardianAI local stack — backend, OpenAI-compatible proxy, frontend, Prometheus.
+# Bring it all up with `docker compose up -d`.
+# All API keys are pulled from the shell env (or .env) and default to empty strings,
+# so the stack boots even without any LLM credentials (agents fall back to
+# neutral verdicts; see backend/src/guardian/llm_judge.py).
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    image: guardian-ai/backend:latest
+    container_name: guardian-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - HF_TOKEN=${HF_TOKEN:-}
+      - GUARDIAN_DOMAIN=${GUARDIAN_DOMAIN:-medical}
+    volumes:
+      - ./data:/app/data
+      - hf-cache:/root/.cache/huggingface
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+
+  proxy:
+    build:
+      context: .
+      dockerfile: Dockerfile.proxy
+    image: guardian-ai/proxy:latest
+    container_name: guardian-proxy
+    ports:
+      - "8001:8001"
+    environment:
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - HF_TOKEN=${HF_TOKEN:-}
+    volumes:
+      - hf-cache:/root/.cache/huggingface
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    image: guardian-ai/frontend:latest
+    container_name: guardian-frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.55.0
+    container_name: guardian-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infra/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=15d'
+      - '--web.enable-lifecycle'
+    restart: unless-stopped
+
+volumes:
+  hf-cache:
+  prometheus-data:
