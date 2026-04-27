@@ -15,6 +15,7 @@ from src.guardian.agents.injection import PromptInjectionAgent
 from src.guardian.agents.pii_in import PIIInAgent
 from src.guardian.agents.pii_out import PIIOutAgent
 from src.guardian.agents.policy import PolicyAgent
+from src.guardian.persistence import TraceStore
 from src.guardian.schemas import (
     GovernanceRequest,
     GovernanceResponse,
@@ -29,12 +30,17 @@ class GovernancePipeline:
         self,
         preflight_agents: list[BaseAgent],
         postflight_agents: list[BaseAgent],
+        *,
+        trace_store: TraceStore | None = None,
     ) -> None:
         self.preflight = preflight_agents
         self.postflight = postflight_agents
+        self.trace_store = trace_store
 
     @classmethod
-    def default(cls, *, domain: str = "medical") -> GovernancePipeline:
+    def default(
+        cls, *, domain: str = "medical", trace_store: TraceStore | None = None
+    ) -> GovernancePipeline:
         # Resolve policy_path relative to this file so the pipeline works regardless of CWD.
         # pipeline.py lives at backend/src/guardian/pipeline.py → parents[2] is backend/.
         policy_path = str(
@@ -52,6 +58,7 @@ class GovernancePipeline:
                 PIIOutAgent(timeout_ms=300),
                 CostPerformanceAgent(timeout_ms=50),
             ],
+            trace_store=trace_store,
         )
 
     async def _run_parallel(
@@ -79,7 +86,7 @@ class GovernancePipeline:
         pre_verdicts = await self._run_parallel(self.preflight, preflight_ctx)
         if any(v.severity == Severity.BLOCK for v in pre_verdicts):
             elapsed = (time.perf_counter() - start) * 1000
-            return GovernanceResponse(
+            resp = GovernanceResponse(
                 trace_id=trace_id,
                 final_output="[Blocked at pre-flight — see verdicts]",
                 blocked=True,
@@ -97,6 +104,13 @@ class GovernancePipeline:
                 ],
                 total_latency_ms=elapsed,
             )
+            if self.trace_store is not None:
+                await self.trace_store.record(
+                    response=resp,
+                    user_input=request.user_input,
+                    session_id=request.session_id,
+                )
+            return resp
 
         # POST-FLIGHT
         postflight_ctx = {
@@ -121,7 +135,7 @@ class GovernancePipeline:
             if v.severity > Severity.SAFE
         ]
         elapsed = (time.perf_counter() - start) * 1000
-        return GovernanceResponse(
+        resp = GovernanceResponse(
             trace_id=trace_id,
             final_output=output,
             blocked=False,
@@ -129,3 +143,10 @@ class GovernancePipeline:
             violations=violations,
             total_latency_ms=elapsed,
         )
+        if self.trace_store is not None:
+            await self.trace_store.record(
+                response=resp,
+                user_input=request.user_input,
+                session_id=request.session_id,
+            )
+        return resp
