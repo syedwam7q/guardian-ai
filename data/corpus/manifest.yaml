@@ -1,0 +1,15 @@
+sources:
+  - name: pubmed_oa_subset
+    url: https://ftp.ncbi.nlm.nih.gov/pub/pmc/oa_bulk/
+    license: PMC-OA
+    topic_filters: [paracetamol, ibuprofen, antibiotics, pregnancy, hypertension, diabetes, asthma]
+    max_docs: 50000
+    field_extract: [pmid, title, abstract, mesh_terms]
+  - name: who_essential_medicines
+    url: https://www.who.int/groups/expert-committee-on-selection-and-use-of-essential-medicines
+    license: CC-BY-NC-SA
+    document_type: pdf
+  - name: drugbank_lite
+    url: https://go.drugbank.com/releases/latest
+    license: CC-BY-NC-4.0
+    fields: [drug_name, interactions, contraindications]
