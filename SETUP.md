@@ -120,15 +120,16 @@ Expected: ≈ 50 tests pass in 5–10 seconds. The first run will be slow becaus
 
 ## 4. Pre-fetch ML models (recommended)
 
-The first request to `/api/v1/govern` triggers three model downloads on cold systems:
+The first request to `/api/v1/govern` triggers three model downloads on cold systems; the first request to `/api/medrag/chat` adds a fourth (the embedding model). Pre-fetching all four is the cleanest way to avoid surprises on first hit:
 
 | Model | Size | Used by |
 |---|---|---|
 | `roberta-large-mnli` (HuggingFace) | ~1.4 GB | `HallucinationAgent` (NLI entailment) |
 | `unitary/unbiased-toxic-roberta` (Detoxify) | ~480 MB | `BiasToxicityAgent` |
 | `en_core_web_lg` (spaCy) | ~580 MB | `PIIInAgent`, `PIIOutAgent` (Presidio) |
+| `BAAI/bge-small-en-v1.5` (HuggingFace) | ~130 MB | `MedRAGRetriever` + `ingest.py` (Phase 3 default) |
 
-To pre-fetch all three so the first API call doesn't pay the download cost:
+To pre-fetch all four so the first API call doesn't pay the download cost:
 
 ```bash
 # from backend/, with venv active
@@ -144,10 +145,16 @@ print('detoxify unbiased ready')
 from presidio_analyzer import AnalyzerEngine
 AnalyzerEngine()
 print('presidio + spacy ready')
+
+from sentence_transformers import SentenceTransformer
+SentenceTransformer('BAAI/bge-small-en-v1.5')
+print('bge-small-en-v1.5 ready')
 "
 ```
 
 Models are cached under `~/.cache/huggingface/` and `~/.cache/torch/`.
+
+> **Note on embedding model choice.** The plan called for `bge-large-en-v1.5` (1.3 GB). Phase 3 ships with `bge-small-en-v1.5` (130 MB) as the default because the small variant downloads in seconds vs. minutes on a fresh client and produces equivalent retrieval ordering on the demo corpus. To use `bge-large` in production, override via the CLI flag `--embedding-model BAAI/bge-large-en-v1.5` and reconstruct `MedRAGRetriever(embedding_model="...")` to match.
 
 ---
 
@@ -157,7 +164,7 @@ GuardianAI is designed to run fully offline; external LLM calls are optional.
 
 | Variable | Required? | Used by | Default behavior if unset |
 |---|---|---|---|
-| `GROQ_API_KEY` | Optional | `llm_judge.judge_factuality()` (Hallucination ensemble, Task 1.13) | Returns a neutral `{"factuality_score": 0.5, "rationale": "GROQ_API_KEY not configured; neutral fallback."}` so unit tests pass without a key. |
+| `GROQ_API_KEY` | Optional (required for live `/api/medrag/chat`) | `MedRAGGenerator.generate_stream()` (Phase 3 chat), `llm_judge.judge_factuality()` (Phase 1 ensemble) | The judge returns a neutral `{"factuality_score": 0.5, "rationale": "GROQ_API_KEY not configured; neutral fallback."}` so unit tests pass without a key. The MedRAG chat endpoint will raise `RuntimeError("GROQ_API_KEY is not set")` on first generation call unless a custom client is injected via `app.dependency_overrides[get_generator]`. |
 | `ANTHROPIC_API_KEY` | Optional | (Reserved for Phase 6 proxy + `claude-haiku-3-5` model option) | No external Anthropic calls in current code paths. |
 
 To set them locally:
@@ -175,34 +182,36 @@ export GROQ_API_KEY="your-groq-key"          # bash/zsh
 
 All test commands assume `cd backend && source .venv/bin/activate`.
 
-### 6.1 Full suite (Phase 1 + Phase 2)
+### 6.1 Full suite (Phase 1 + Phase 2 + Phase 3)
 
 ```bash
 pytest -v
 ```
 
-Expected: **65 tests pass** in ~13 seconds (after model warmup).
+Expected: **81 tests pass** in ~40 seconds (after model warmup; first run is much slower because the embedding model + corpus ingestion fixtures load on first invocation).
 
 ### 6.2 Coverage report
 
 ```bash
-pytest --cov=src/guardian --cov-report=term-missing
+pytest --cov=src/guardian --cov=src/medrag --cov-report=term-missing
 ```
 
 Current coverage:
 
 - `src/guardian/` overall: **91%**
 - `src/guardian/causal/` overall: **97%**
+- `src/medrag/` overall: **94%** (CLI argparse paths in `ingest.py` are uncovered by unit tests).
 
 ### 6.3 Targeted slices
 
 ```bash
 pytest tests/unit/guardian/             # Phase 1 agent + schema tests (~38 tests, 5–8 s)
 pytest tests/unit/causal/               # Phase 2 DAG/intervention/estimation tests (~12 tests, < 1 s)
-pytest tests/integration/               # End-to-end pipeline + API tests (~7 tests, ~10 s)
+pytest tests/unit/medrag/               # Phase 3 generation + retrieval tests (~7 tests, 5–25 s)
+pytest tests/integration/               # End-to-end pipeline + API + sessions/feedback (~12 tests)
+pytest tests/integration/test_corpus_ingest.py -v   # corpus ingestion E2E (slow first run)
+pytest tests/e2e/                       # MedRAG SSE chat (~2 tests, ~9 s)
 pytest tests/eval/                      # Causal attribution smoke (~2 tests, < 1 s)
-pytest tests/integration/test_pipeline_e2e.py -v
-pytest tests/integration/test_governance_api.py -v
 ```
 
 ### 6.4 Linting
@@ -275,7 +284,64 @@ curl -X POST http://localhost:8000/api/v1/govern \
 
 `blocked: true` with a `verdicts[*].severity == "BLOCK"` from the `prompt_injection` agent.
 
-### 7.5 Production-style start (no reload)
+### 7.5 Sample MedRAG chat (SSE streaming)
+
+The MedRAG endpoint requires (a) an ingested ChromaDB index and (b) `GROQ_API_KEY` set. Quick prep:
+
+```bash
+# from backend/, with venv active
+python -m src.medrag.ingest --rebuild     # ingests data/corpus/demo_medical_corpus.jsonl
+export GROQ_API_KEY="your-groq-key"
+uvicorn src.main:app --reload --port 8000
+```
+
+Then in another terminal:
+
+```bash
+curl -N -X POST http://localhost:8000/api/medrag/chat \
+  -H "Content-Type: application/json" \
+  -d '{"user_input": "What is paracetamol used for in pregnancy?", "session_id": "demo-medrag-1"}'
+```
+
+`-N` disables curl's buffering so SSE events stream as they arrive. You'll see:
+
+```
+event: trace
+data: {"trace_id": "..."}
+
+event: retrieval
+data: {"doc_ids": ["demo-paracetamol-pregnancy-1", ...], "scores": [0.92, ...]}
+
+event: token
+data: Para
+
+event: token
+data: cetamol
+
+...
+
+event: verdicts
+data: [{"agent": "prompt_injection", "severity": 0, ...}, ...]
+
+event: done
+data:
+```
+
+If `GROQ_API_KEY` isn't set, the stream emits an `error` event then `done`. To run the chat path entirely offline (no Groq), inject a stub generator via `app.dependency_overrides[get_generator]` in code (the test suite does this — see `tests/e2e/test_medrag_chat.py`).
+
+### 7.6 Sample sessions + feedback
+
+```bash
+# List recent chat sessions:
+curl http://localhost:8000/api/medrag/sessions | python -m json.tool
+
+# Submit feedback on a trace:
+curl -X POST http://localhost:8000/api/medrag/feedback \
+  -H "Content-Type: application/json" \
+  -d '{"trace_id": "<from /chat trace event>", "rating": "thumbs_up", "comment": "great answer"}'
+```
+
+### 7.7 Production-style start (no reload)
 
 ```bash
 uvicorn src.main:app --host 0.0.0.0 --port 8000 --workers 2
@@ -291,12 +357,30 @@ Workers > 1 means each worker independently warms the model cache. For tight mem
 |---|---|---|---|
 | `GET` | `/api/v1/health` | shipped | Liveness probe; returns `{"status": "ok"}`. |
 | `POST` | `/api/v1/govern` | shipped | Run the full 3-stage governance pipeline on a request/output pair. Returns a `GovernanceResponse`. |
-| `POST` | `/api/v1/diagnose/{trace_id}` | **stub (503)** | On-demand causal diagnosis. Currently returns HTTP 503 with a "not configured" detail; full wiring requires a TraceStore-fetch helper, executor callbacks for the live LLM, and a configured `CausalEngine`. Pass a `causal_engine` to `GovernancePipeline.default()` and use `/api/v1/govern` instead. |
+| `POST` | `/api/v1/diagnose/{trace_id}` | **stub (503)** | On-demand causal diagnosis. Returns HTTP 503 with a "not configured" detail; full wiring requires a TraceStore-fetch helper, executor callbacks for the live LLM, and a configured `CausalEngine`. Pass a `causal_engine` to `GovernancePipeline.default()` and use `/api/v1/govern` instead. |
+| `POST` | `/api/medrag/chat` | shipped | SSE streaming chat. Pre-flight → retrieval → generation (token stream) → post-flight verdicts → optional decision. Requires `GROQ_API_KEY` for live calls. |
+| `GET` | `/api/medrag/sessions` | shipped | List recent chat sessions (`?limit=50`). Returns `{sessions: [{session_id, trace_count, last_seen, last_user_input}]}`. |
+| `POST` | `/api/medrag/feedback` | shipped | Submit thumbs-up/down + optional comment on a trace. Returns the new `feedback_id`. |
 | `GET` | `/metrics` | shipped | Prometheus metrics (RPS, latency histograms, status-code counts). |
 | `GET` | `/docs` | shipped | OpenAPI Swagger UI. |
 | `GET` | `/redoc` | shipped | ReDoc rendering of the same schema. |
 
 Schemas live in `backend/src/guardian/schemas.py`; the `/docs` endpoint renders them automatically.
+
+### MedRAG SSE event types
+
+The `/api/medrag/chat` endpoint emits events in this order on the **clean path**:
+
+| Event | Payload | When |
+|---|---|---|
+| `trace` | `{"trace_id": "<uuid>"}` | First — always. |
+| `retrieval` | `{"doc_ids": [...], "scores": [...]}` | After retrieval, before generation. |
+| `token` | `<delta string>` | One per Groq streaming chunk. |
+| `verdicts` | `[<Verdict JSON>, ...]` | After generation completes; includes pre-flight + post-flight verdicts. |
+| `decision` | `<Decision JSON>` | Only when the pipeline has a `decision_engine` wired AND violations exist. |
+| `done` | `""` | Last — always. |
+
+On the **blocked path** (adversarial input), the sequence is `trace` → `blocked` → `done`. On a **generation error**, it's `trace` → `retrieval` → `error` → `done`.
 
 ---
 
@@ -374,16 +458,38 @@ python
 ...     print(c.node, round(c.effect, 3), "[", round(c.ci_low, 3), ",", round(c.ci_high, 3), "]")
 ```
 
-### 10.4 Phase tagging conventions
+### 10.4 Build and query the MedRAG corpus interactively
+
+```bash
+# from backend/, with venv active
+python -m src.medrag.ingest --rebuild   # ingests data/corpus/demo_medical_corpus.jsonl
+python
+>>> import asyncio
+>>> from src.medrag.retrieval import MedRAGRetriever
+>>> r = MedRAGRetriever()
+>>> chunks = asyncio.run(r.retrieve("paracetamol pregnancy", k=3))
+>>> for c in chunks: print(f"{c.score:.3f} {c.doc_id}: {c.text[:80]}...")
+```
+
+To use the larger embedding model in production:
+
+```bash
+python -m src.medrag.ingest --rebuild --embedding-model BAAI/bge-large-en-v1.5
+# then in code:
+# r = MedRAGRetriever(embedding_model="BAAI/bge-large-en-v1.5")
+```
+
+### 10.5 Phase tagging conventions
 
 Each completed phase pushes a tag:
 
 ```bash
 git tag phase-1-complete   # → 2f13b2b (after Task 1.16)
 git tag phase-2-complete   # → 9c9652f (after Task 2.9)
+git tag phase-3-complete   # → 6bb5218 (after Task 3.7)
 ```
 
-Phase 3, 4, ... will follow the same pattern.
+Phase 4+ will follow the same pattern.
 
 ---
 
@@ -400,9 +506,10 @@ guardian-ai/
 │   ├── policies/
 │   │   └── medical.yaml             # YAML policy rules (PolicyAgent)
 │   ├── src/
-│   │   ├── main.py                  # FastAPI app
+│   │   ├── main.py                  # FastAPI app (governance + medrag routers)
 │   │   ├── api/routes/
-│   │   │   └── governance.py        # /api/v1/govern, /api/v1/diagnose/{trace_id}
+│   │   │   ├── governance.py        # /api/v1/govern, /api/v1/diagnose/{trace_id}
+│   │   │   └── medrag.py            # /api/medrag/chat (SSE), /sessions, /feedback
 │   │   ├── eval/
 │   │   │   └── causal_attribution_eval.py
 │   │   ├── guardian/
@@ -411,10 +518,14 @@ guardian-ai/
 │   │   │   ├── decision.py          # Constraint-based DecisionEngine
 │   │   │   ├── llm_judge.py         # Groq-backed factuality judge
 │   │   │   ├── observers.py         # In-flight RetrievalObserver / PromptObserver
-│   │   │   ├── persistence.py       # DuckDB TraceStore
+│   │   │   ├── persistence.py       # DuckDB TraceStore (traces + feedback tables)
 │   │   │   ├── pipeline.py          # 3-stage GovernancePipeline orchestrator
 │   │   │   └── schemas.py           # Pydantic schemas (Verdict, Decision, ...)
-│   │   ├── medrag/                  # (Phase 3 — empty scaffold)
+│   │   ├── medrag/                  # Phase 3 — corpus ingestion + RAG
+│   │   │   ├── ingest.py            # CLI: load → chunk → embed → ChromaDB
+│   │   │   ├── retrieval.py         # MedRAGRetriever over ChromaDB
+│   │   │   ├── generation.py        # MedRAGGenerator (streaming Groq Llama)
+│   │   │   └── prompts.py           # MEDRAG_SYSTEM_PROMPT
 │   │   ├── proxy/                   # (Phase 6 — empty scaffold)
 │   │   ├── reporting/               # (Phase 7 — empty scaffold)
 │   │   └── sdk/                     # (Phase 5 — empty scaffold)
@@ -422,11 +533,16 @@ guardian-ai/
 │       ├── test_smoke.py
 │       ├── unit/
 │       │   ├── causal/              # 5 test files (DAG/intervention/executor/estimation/dowhy)
-│       │   └── guardian/            # 11 test files (one per agent + schemas + observers + persistence + decision)
-│       ├── integration/             # pipeline e2e, governance API, causal-engine, pipeline-with-causal
+│       │   ├── guardian/            # 11 test files (one per agent + schemas + observers + persistence + decision)
+│       │   └── medrag/              # 2 test files (retrieval + generation)
+│       ├── integration/             # pipeline e2e, governance API, causal-engine, pipeline-with-causal, sessions/feedback, corpus ingest
+│       ├── e2e/                     # MedRAG SSE chat
 │       └── eval/                    # causal attribution smoke
 ├── frontend/                        # Vite + React + TS scaffold (Phase 4 land soon)
-├── data/                            # local data dir (DuckDB writes here at data/duckdb/traces.db)
+├── data/                            # local data dir
+│   ├── corpus/                      # demo_medical_corpus.jsonl + manifest.yaml
+│   ├── chroma/                      # ChromaDB persistent index (created by ingest.py)
+│   └── duckdb/                      # traces.db (created by TraceStore on first call)
 ├── docs/
 │   └── superpowers/plans/
 │       └── 2026-04-27-guardianai-implementation.md   # the master roadmap
@@ -469,7 +585,7 @@ guardian-ai/
 | Phase 0 | Cleanup + scaffolding | (no tag) | 3 smoke | – |
 | Phase 1 | Core governance plane (7 agents + pipeline + decision + API + persistence) | `phase-1-complete` | 49 | 91% on `guardian/` |
 | Phase 2 | Causal Diagnosis Engine (DAG + interventions + estimation + ranking) | `phase-2-complete` | 65 cumulative | 97% on `guardian/causal/` |
-| Phase 3 | MedRAG demo (corpus, retrieval, generation, streaming chat) | upcoming | – | – |
+| Phase 3 | MedRAG demo (corpus, retrieval, streaming chat, sessions, feedback) | `phase-3-complete` | 81 cumulative | 94% on `medrag/` |
 | Phase 4 | Frontend (8 pages + 6 "wow" moments) | upcoming | – | – |
 | Phase 5 | Python SDK | upcoming | – | – |
 | Phase 6 | OpenAI-compatible HTTP proxy | upcoming | – | – |
@@ -524,6 +640,35 @@ npm install --legacy-peer-deps
 
 ### "DoWhy estimator emits warnings"
 `tests/unit/causal/test_dowhy_estimator.py` emits two non-fatal warnings on tiny synthetic fixtures (unobserved DAG variables, statsmodels small-sample normtest). Both are expected and do not affect the test outcome.
+
+### `/api/medrag/chat` returns an `error` event immediately
+Most likely `GROQ_API_KEY` isn't set. The MedRAG generator raises `RuntimeError("GROQ_API_KEY is not set")` on the first generation call; the route catches it and emits an `error` SSE event followed by `done`. Set the env var, or override `app.dependency_overrides[get_generator]` with a stubbed generator (the test suite does this).
+
+### `MedRAGRetriever` returns nothing / empty docs
+The Chroma index isn't built yet. Run `python -m src.medrag.ingest --rebuild` from `backend/` (with venv active) to populate `data/chroma/medrag-corpus/` from the bundled demo corpus. To verify:
+
+```bash
+python -c "
+from src.medrag.retrieval import MedRAGRetriever
+import asyncio
+print(asyncio.run(MedRAGRetriever().retrieve('paracetamol pregnancy', k=3)))
+"
+```
+
+### Chroma "Collection medrag does not exist" error
+Same root cause as above — run `python -m src.medrag.ingest --rebuild` first. The collection is created lazily on ingest, not on first retrieval.
+
+### `BAAI/bge-large-en-v1.5` download is slow / hangs on Hugging Face
+HF Hub rate-limits unauthenticated requests; the 1.3 GB BGE-large can take many minutes on a fresh client. Phase 3 defaults to `bge-small-en-v1.5` (~130 MB) for this reason. To use bge-large, set a `HF_TOKEN` env var to authenticate, then re-run ingest with `--embedding-model BAAI/bge-large-en-v1.5`.
+
+### Real corpus ingestion (PubMed + WHO + DrugBank)
+The shipped pipeline (`src/medrag/ingest.py`) processes any JSONL with `{doc_id, text, metadata?}` records. To use real medical sources at scale:
+
+1. Download PubMed Open Access Subset abstracts (filter by topic per `data/corpus/manifest.yaml`).
+2. Convert to JSONL with one record per abstract.
+3. Run `python -m src.medrag.ingest --rebuild --corpus path/to/pubmed.jsonl --chroma-path data/chroma/pubmed --embedding-model BAAI/bge-large-en-v1.5`.
+
+Real ingestion is a documented offline step — not part of the CI test suite.
 
 ---
 
