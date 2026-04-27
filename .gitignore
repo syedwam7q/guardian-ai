@@ -20,6 +20,11 @@ node_modules/
 frontend/dist/
 .vite/
 
+# TypeScript build artifacts
+*.tsbuildinfo
+frontend/vite.config.js
+frontend/vite.config.d.ts
+
 # Data (local-only artifacts)
 data/chroma/
 data/duckdb/
