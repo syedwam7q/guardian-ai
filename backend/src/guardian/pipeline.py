@@ -15,8 +15,11 @@ from src.guardian.agents.injection import PromptInjectionAgent
 from src.guardian.agents.pii_in import PIIInAgent
 from src.guardian.agents.pii_out import PIIOutAgent
 from src.guardian.agents.policy import PolicyAgent
+from src.guardian.causal.engine import CausalEngine
+from src.guardian.decision import DecisionEngine
 from src.guardian.persistence import TraceStore
 from src.guardian.schemas import (
+    Decision,
     GovernanceRequest,
     GovernanceResponse,
     Severity,
@@ -32,14 +35,23 @@ class GovernancePipeline:
         postflight_agents: list[BaseAgent],
         *,
         trace_store: TraceStore | None = None,
+        causal_engine: CausalEngine | None = None,
+        decision_engine: DecisionEngine | None = None,
     ) -> None:
         self.preflight = preflight_agents
         self.postflight = postflight_agents
         self.trace_store = trace_store
+        self.causal_engine = causal_engine
+        self.decision_engine = decision_engine
 
     @classmethod
     def default(
-        cls, *, domain: str = "medical", trace_store: TraceStore | None = None
+        cls,
+        *,
+        domain: str = "medical",
+        trace_store: TraceStore | None = None,
+        causal_engine: CausalEngine | None = None,
+        decision_engine: DecisionEngine | None = None,
     ) -> GovernancePipeline:
         # Resolve policy_path relative to this file so the pipeline works regardless of CWD.
         # pipeline.py lives at backend/src/guardian/pipeline.py → parents[2] is backend/.
@@ -59,6 +71,8 @@ class GovernancePipeline:
                 CostPerformanceAgent(timeout_ms=50),
             ],
             trace_store=trace_store,
+            causal_engine=causal_engine,
+            decision_engine=decision_engine,
         )
 
     async def _run_parallel(
@@ -134,6 +148,42 @@ class GovernancePipeline:
             for v in pre_verdicts + post_verdicts
             if v.severity > Severity.SAFE
         ]
+
+        # Causal diagnosis (Phase 2): run when violations exist and engine is wired.
+        decision: Decision | None = None
+        causal_attribution: list[dict[str, Any]] = []
+
+        if violations and self.causal_engine is not None:
+            baseline_trace = {
+                "model_params": {"temperature": 0.7, "top_p": 1.0},
+                "model": model,
+                "retrieved_docs": retrieved_docs,
+                "user_input": request.user_input,
+            }
+            worst_violation = max(violations, key=lambda v: v.severity)
+            diag = await self.causal_engine.diagnose(
+                baseline_trace=baseline_trace,
+                baseline_violation_score=worst_violation.confidence,
+                violation_summary=f"{worst_violation.agent.value}: {worst_violation.summary}",
+            )
+            causal_attribution = [
+                {
+                    "node": ce.node,
+                    "effect": ce.effect,
+                    "ci_low": ce.ci_low,
+                    "ci_high": ce.ci_high,
+                    "n_samples": ce.n_samples,
+                }
+                for ce in diag.ranked_causes
+            ]
+
+        if violations and self.decision_engine is not None:
+            decision = await self.decision_engine.decide(
+                violations=violations,
+                causal_attribution=causal_attribution,
+                similar_past=[],  # Decision Memory deferred to Phase 3+
+            )
+
         elapsed = (time.perf_counter() - start) * 1000
         resp = GovernanceResponse(
             trace_id=trace_id,
@@ -141,6 +191,7 @@ class GovernancePipeline:
             blocked=False,
             verdicts=list(pre_verdicts) + list(post_verdicts),
             violations=violations,
+            decision=decision,
             total_latency_ms=elapsed,
         )
         if self.trace_store is not None:

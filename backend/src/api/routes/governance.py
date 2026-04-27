@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from src.guardian.pipeline import GovernancePipeline
@@ -51,4 +53,24 @@ async def govern(
         input_tokens=payload.input_tokens,
         output_tokens=payload.output_tokens,
         latency_ms=payload.latency_ms,
+    )
+
+
+@router.post("/diagnose/{trace_id}")
+async def diagnose(trace_id: UUID) -> dict:
+    """On-demand causal diagnosis (Phase 3+ wiring).
+
+    The full implementation requires (a) a TraceStore.fetch lookup for the
+    original trace inputs, (b) a configured CausalEngine with executor
+    callbacks, and (c) a DAG of how those callbacks connect to the trace.
+    These are deferred. This stub exists so the route is reserved and
+    consumers receive an explicit 503 instead of a 404.
+    """
+    raise HTTPException(
+        status_code=503,
+        detail=(
+            "On-demand causal diagnosis is not yet wired in this build. "
+            "Pass a causal_engine to GovernancePipeline.default(...) and "
+            "run /api/v1/govern instead."
+        ),
     )
