@@ -6,6 +6,7 @@ import { EventFeed } from "@/components/console/EventFeed";
 import { EventTicker } from "@/components/console/EventTicker";
 import { FilterPanel } from "@/components/console/FilterPanel";
 import { Skeleton } from "@/components/ui/skeleton";
+import { usePageTitle } from "@/hooks/usePageTitle";
 import {
   generateMockEvents,
   type AgentName,
@@ -16,6 +17,7 @@ import {
 const INITIAL_EVENTS = generateMockEvents(60, 42);
 
 export default function Console() {
+  usePageTitle("Governance Console");
   const [params] = useSearchParams();
   const [events, setEvents] = useState<GovEvent[]>(INITIAL_EVENTS);
   const [liveMode, setLiveMode] = useState(false);
@@ -23,7 +25,7 @@ export default function Console() {
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    const id = window.setTimeout(() => setMounted(true), 300);
+    const id = window.setTimeout(() => setMounted(true), 250);
     return () => window.clearTimeout(id);
   }, []);
 
@@ -50,7 +52,7 @@ export default function Console() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <header className="flex items-center justify-between border-b border-border-subtle bg-bg-surface px-8 py-5">
+      <header className="flex flex-col gap-3 border-b border-border-subtle bg-bg-surface px-6 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-8">
         <div>
           <p className="font-mono text-xs uppercase tracking-wider text-[var(--text-tertiary)]">
             Operator
@@ -68,7 +70,7 @@ export default function Console() {
         </div>
       </header>
 
-      <div className="flex-1 space-y-6 overflow-y-auto p-8">
+      <div className="flex-1 space-y-6 overflow-y-auto p-6 sm:p-8">
         {!mounted ? (
           <ConsoleSkeleton />
         ) : (
@@ -100,15 +102,38 @@ export default function Console() {
   );
 }
 
+/**
+ * Skeleton mirrors the shape of the loaded console: 4 ticker cards across the
+ * top, then a feed of rows so the layout doesn't jump on hydration.
+ */
 function ConsoleSkeleton() {
   return (
-    <div className="space-y-6">
-      <Skeleton className="h-20 w-full" />
-      <div className="space-y-2">
-        <Skeleton className="h-10 w-full" />
-        {Array.from({ length: 8 }).map((_, i) => (
-          <Skeleton key={i} className="h-14 w-full" />
+    <div className="space-y-6" aria-hidden="true">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div
+            key={i}
+            className="flex h-24 items-center gap-4 rounded-lg border border-border-subtle bg-bg-surface px-5"
+          >
+            <Skeleton className="h-10 w-10 rounded-md" />
+            <div className="flex-1 space-y-2">
+              <Skeleton className="h-3 w-24" />
+              <Skeleton className="h-6 w-16" />
+            </div>
+            <Skeleton className="h-12 w-32" />
+          </div>
         ))}
+      </div>
+      <div className="rounded-lg border border-border-subtle bg-bg-surface">
+        <div className="flex items-center justify-between border-b border-border-subtle px-5 py-3">
+          <Skeleton className="h-5 w-40" />
+          <Skeleton className="h-8 w-24" />
+        </div>
+        <div className="space-y-1 p-2">
+          {Array.from({ length: 8 }).map((_, i) => (
+            <Skeleton key={i} className="h-12 w-full" />
+          ))}
+        </div>
       </div>
     </div>
   );

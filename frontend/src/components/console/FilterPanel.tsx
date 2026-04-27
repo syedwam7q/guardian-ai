@@ -110,8 +110,9 @@ export function FilterPanel() {
                     key={a}
                     type="button"
                     onClick={() => toggleAgent(a)}
+                    aria-pressed={active}
                     className={cn(
-                      "rounded-md border px-2.5 py-1 font-mono text-xs transition-colors",
+                      "rounded-md border px-2.5 py-1 font-mono text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal-causal focus-visible:ring-offset-2 focus-visible:ring-offset-bg-deep",
                       active
                         ? "border-signal-causal bg-signal-causal/15 text-signal-causal"
                         : "border-border-subtle bg-bg-elevated text-[var(--text-secondary)] hover:text-[var(--text-primary)]",
@@ -138,8 +139,9 @@ export function FilterPanel() {
                     key={s}
                     type="button"
                     onClick={() => toggleSeverity(s)}
+                    aria-pressed={active}
                     className={cn(
-                      "rounded-md border px-2.5 py-1 font-mono text-xs transition-colors",
+                      "rounded-md border px-2.5 py-1 font-mono text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal-causal focus-visible:ring-offset-2 focus-visible:ring-offset-bg-deep",
                       active
                         ? "border-signal-causal bg-signal-causal/15 text-signal-causal"
                         : "border-border-subtle bg-bg-elevated text-[var(--text-secondary)] hover:text-[var(--text-primary)]",
@@ -164,8 +166,9 @@ export function FilterPanel() {
                   key={r.value}
                   type="button"
                   onClick={() => update({ range: r.value })}
+                  aria-pressed={range === r.value}
                   className={cn(
-                    "rounded-md border px-3 py-1 text-xs transition-colors",
+                    "rounded-md border px-3 py-1 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal-causal focus-visible:ring-offset-2 focus-visible:ring-offset-bg-deep",
                     range === r.value
                       ? "border-signal-causal bg-signal-causal/15 text-signal-causal"
                       : "border-border-subtle bg-bg-elevated text-[var(--text-secondary)] hover:text-[var(--text-primary)]",

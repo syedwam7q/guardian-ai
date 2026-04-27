@@ -15,7 +15,13 @@ export function Logo({ size = 24, className }: LogoProps) {
       role="img"
       aria-label="GuardianAI"
     >
-      {/* Outer shield/ring suggesting the governance boundary */}
+      <defs>
+        <radialGradient id="gai-node" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stopColor="var(--signal-causal)" stopOpacity="1" />
+          <stop offset="100%" stopColor="var(--signal-causal)" stopOpacity="0.55" />
+        </radialGradient>
+      </defs>
+      {/* Outer governance boundary */}
       <circle
         cx="12"
         cy="12"
@@ -24,7 +30,16 @@ export function Logo({ size = 24, className }: LogoProps) {
         strokeWidth="1.75"
         opacity="0.85"
       />
-      {/* Stylised "G": opening at the right with a horizontal stub flowing inward,
+      {/* Thin inner ring for depth */}
+      <circle
+        cx="12"
+        cy="12"
+        r="7.25"
+        stroke="currentColor"
+        strokeWidth="0.6"
+        opacity="0.35"
+      />
+      {/* Stylised "G" — opening at the right with horizontal stub flowing inward,
           evoking a directed edge in a causal DAG. */}
       <path
         d="M16.5 8.25 A5.5 5.5 0 1 0 17 15.5 H12.5"
@@ -33,8 +48,8 @@ export function Logo({ size = 24, className }: LogoProps) {
         strokeLinecap="round"
         strokeLinejoin="round"
       />
-      {/* Inner causal node accent */}
-      <circle cx="12.5" cy="12" r="1.6" fill="var(--signal-causal)" />
+      {/* Inner causal node with radial gradient depth */}
+      <circle cx="12.5" cy="12" r="1.6" fill="url(#gai-node)" />
     </svg>
   );
 }

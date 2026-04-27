@@ -13,4 +13,42 @@ body {
   font-feature-settings:
     "ss01" on,
     "cv11" on;
+  /* Smooth theme transitions across all surfaces. */
+  transition:
+    background-color 200ms ease,
+    color 200ms ease;
+}
+
+/* Skip-to-content link styling — only visible when focused. */
+.skip-link {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 100;
+  padding: 0.5rem 1rem;
+  background: var(--signal-causal);
+  color: white;
+  border-bottom-right-radius: 0.375rem;
+  font-weight: 500;
+  transform: translateY(-200%);
+  transition: transform 150ms ease;
+}
+.skip-link:focus,
+.skip-link:focus-visible {
+  transform: translateY(0);
+  outline: 2px solid var(--signal-causal);
+  outline-offset: 2px;
+}
+
+/* Honor user motion preferences globally — disable all animations / transitions
+   for users who set prefers-reduced-motion. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

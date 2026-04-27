@@ -110,7 +110,8 @@ export function GovernanceTracePane({
   function rowFor(key: string, label: string, index: number) {
     const v = verdictsByAgent.get(key);
     const severity = v ? normalizeSeverity(v.severity) : "pending";
-    const phaseKey = severity === "pending" ? "pending" : "filled";
+    // Re-key the inner row on severity changes so the badge briefly pulses
+    // with the new color (mount animation + scale).
     return (
       <motion.div
         key={key}
@@ -120,9 +121,9 @@ export function GovernanceTracePane({
       >
         <AnimatePresence mode="wait" initial={false}>
           <motion.div
-            key={phaseKey}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
+            key={severity}
+            initial={{ opacity: 0, scale: 0.97 }}
+            animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.2 }}
           >
@@ -150,7 +151,10 @@ export function GovernanceTracePane({
   }
 
   return (
-    <aside className="flex h-full min-h-0 flex-col border-l border-border-subtle bg-bg-deep">
+    <aside
+      aria-label="Governance trace"
+      className="flex h-full min-h-0 flex-col border-l border-border-subtle bg-bg-deep"
+    >
       <div className="border-b border-border-subtle px-5 py-4">
         <p className="font-mono text-[10px] uppercase tracking-wider text-[var(--text-tertiary)]">
           Governance Trace
@@ -163,20 +167,27 @@ export function GovernanceTracePane({
             <button
               type="button"
               onClick={copyTraceId}
+              aria-label="Copy trace ID"
               title="Copy trace ID"
-              className="inline-flex h-6 w-6 items-center justify-center rounded text-[var(--text-secondary)] transition-colors hover:bg-bg-elevated hover:text-[var(--text-primary)]"
+              className="inline-flex h-6 w-6 items-center justify-center rounded text-[var(--text-secondary)] transition-colors hover:bg-bg-elevated hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal-causal focus-visible:ring-offset-2 focus-visible:ring-offset-bg-deep"
             >
               {copied ? (
-                <Check className="h-3.5 w-3.5" />
+                <Check className="h-3.5 w-3.5" aria-hidden="true" />
               ) : (
-                <Copy className="h-3.5 w-3.5" />
+                <Copy className="h-3.5 w-3.5" aria-hidden="true" />
               )}
               <span className="sr-only">Copy trace ID</span>
             </button>
           )}
           {loading && (
-            <span className="ml-auto inline-flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider text-signal-causal">
-              <span className="h-1.5 w-1.5 rounded-full bg-signal-causal animate-pulse" />
+            <span
+              role="status"
+              className="ml-auto inline-flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider text-signal-causal"
+            >
+              <span
+                aria-hidden="true"
+                className="h-1.5 w-1.5 rounded-full bg-signal-causal motion-safe:animate-pulse"
+              />
               streaming
             </span>
           )}

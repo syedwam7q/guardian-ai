@@ -6,35 +6,36 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const SNIPPETS: Record<string, string> = {
-  builtin: `# Run the built-in FastAPI server
-uvicorn src.main:app --reload --port 8000
+  builtin: `# Run the built-in FastAPI server (Phase 1+)
+uvicorn src.main:app --port 8000
 
 # Send a governed request
-curl -X POST http://localhost:8000/api/v1/medrag/chat \\
+curl -X POST http://localhost:8000/api/medrag/chat \\
   -H "Content-Type: application/json" \\
+  -H "Accept: text/event-stream" \\
   -d '{
     "session_id": "demo",
     "user_input": "What is the safe dose of paracetamol?"
   }'`,
-  sdk: `# Install
+  sdk: `# Install (Phase 5)
 pip install guardianai
 
-# Use the decorator on any LLM function
+# Use the @guardian.govern decorator on any LLM function
 from guardian import guardian
 
-@guardian(domain="medical")
+@guardian.govern(domain="medical")
 def answer(query: str) -> str:
     return llm.complete(query)
 
-# All seven agents run automatically.
-# Inspect the trace via .last_trace()
+# All seven agents run automatically — pre-flight gates the call,
+# post-flight inspects the output. Inspect the trace via .last_trace().
 print(answer.last_trace().verdicts)`,
-  proxy: `# Drop-in OpenAI-compatible proxy
+  proxy: `# OpenAI-compatible HTTP proxy (Phase 6 — coming next)
 docker run -p 4000:4000 \\
   -e GUARDIAN_DOMAIN=medical \\
   guardianai/proxy:latest
 
-# Then point your existing client at it
+# Then point your existing client at it — no code changes
 import openai
 openai.api_base = "http://localhost:4000/v1"
 openai.api_key  = "sk-..."  # forwarded as-is
@@ -64,11 +65,18 @@ function Snippet({ text }: SnippetProps) {
         {text}
       </pre>
       <div className="absolute right-2 top-2">
-        <Button variant="outline" size="sm" onClick={copy} className="gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={copy}
+          className="gap-2"
+          aria-label="Copy snippet to clipboard"
+        >
           {copied ? (
-            <Check className="h-3.5 w-3.5" aria-hidden />
+            <Check className="h-3.5 w-3.5" aria-hidden="true" />
           ) : (
-            <Copy className="h-3.5 w-3.5" aria-hidden />
+            <Copy className="h-3.5 w-3.5" aria-hidden="true" />
           )}
           {copied ? "Copied" : "Copy"}
         </Button>
@@ -99,11 +107,14 @@ export function InstallTabs() {
           <TabsContent value="sdk">
             <Snippet text={SNIPPETS.sdk} />
             <p className="mt-2 font-mono text-[10px] text-[var(--text-tertiary)]">
-              SDK ships in Phase 5 — code shown reflects the planned API.
+              SDK shipped in Phase 5 — the snippet above reflects the live API.
             </p>
           </TabsContent>
           <TabsContent value="proxy">
             <Snippet text={SNIPPETS.proxy} />
+            <p className="mt-2 font-mono text-[10px] text-[var(--text-tertiary)]">
+              Proxy lands in Phase 6 — preview the planned drop-in interface.
+            </p>
           </TabsContent>
         </Tabs>
       </CardContent>

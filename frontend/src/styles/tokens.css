@@ -6,8 +6,9 @@
   --border-subtle: #1f2a44;
   --border-strong: #2d3b5e;
   --text-primary: #e8edf7;
-  --text-secondary: #97a3bd;
-  --text-tertiary: #5a6783;
+  --text-secondary: #a3b0cc;
+  /* Lifted from #5a6783 for WCAG AA against --bg-deep (was 3.7:1 → now ~5.0:1). */
+  --text-tertiary: #7e8aa6;
   --signal-safe: #4ade80;
   --signal-watch: #fbbf24;
   --signal-block: #f87171;
@@ -22,11 +23,12 @@
   --border-subtle: #d8dde6;
   --border-strong: #b8bfcc;
   --text-primary: #0a0e1a;
-  --text-secondary: #475569;
-  --text-tertiary: #6b7280;
-  --signal-safe: #16a34a;
-  --signal-watch: #d97706;
-  --signal-block: #dc2626;
-  --signal-causal: #7c3aed;
-  --signal-info: #2563eb;
+  --text-secondary: #3f4a5e;
+  /* Darkened from #6b7280 for WCAG AA on tinted backgrounds. */
+  --text-tertiary: #56627a;
+  --signal-safe: #15803d;
+  --signal-watch: #b45309;
+  --signal-block: #b91c1c;
+  --signal-causal: #6d28d9;
+  --signal-info: #1d4ed8;
 }

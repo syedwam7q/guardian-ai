@@ -52,13 +52,15 @@ export function RankedCausesList({
             {!compact && onWhatIf && (
               <div className="mt-2">
                 <Button
+                  type="button"
                   size="sm"
                   variant="ghost"
                   onClick={() => onWhatIf(c.node)}
                   className="h-7 px-2 text-xs"
+                  aria-label={`Run a what-if scenario for ${c.node}`}
                 >
                   What if I changed this?
-                  <ChevronRight className="ml-1 h-3 w-3" aria-hidden />
+                  <ChevronRight className="ml-1 h-3 w-3" aria-hidden="true" />
                 </Button>
               </div>
             )}

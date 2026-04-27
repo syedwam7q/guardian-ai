@@ -7,6 +7,7 @@ import {
 } from "@/components/chat/ConversationPane";
 import { GovernanceTracePane } from "@/components/chat/GovernanceTracePane";
 import { useSSEChat, type SSEEvent } from "@/hooks/useSSEChat";
+import { usePageTitle } from "@/hooks/usePageTitle";
 
 interface TraceHistoryRecord {
   trace_id: string | null;
@@ -38,6 +39,7 @@ function pickRetrieval(events: SSEEvent[]): {
 }
 
 export default function Chat() {
+  usePageTitle("MedRAG Chat");
   const sessionIdRef = useRef<string>(newSessionId());
   const { events, loading, error, send } = useSSEChat();
 
@@ -45,8 +47,7 @@ export default function Chat() {
   const [history, setHistory] = useState<TraceHistoryRecord[]>([]);
   const [selectedCitation, setSelectedCitation] = useState<number | null>(null);
 
-  // When a stream completes (loading flips false after we had events),
-  // archive the assistant message and the events under their trace_id.
+  // Archive completed streams.
   const archivedRef = useRef(false);
   useEffect(() => {
     if (loading) {
@@ -110,8 +111,6 @@ export default function Chat() {
     [send],
   );
 
-  // Choose which retrieval to use for the citation drawer:
-  // prefer the live stream, else the last archived record.
   const retrievalForDrawer = useMemo(() => {
     if (events.length > 0) return pickRetrieval(events);
     const last = history[history.length - 1];
@@ -121,7 +120,7 @@ export default function Chat() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <header className="border-b border-border-subtle bg-bg-surface px-8 py-5">
+      <header className="border-b border-border-subtle bg-bg-surface px-6 py-5 sm:px-8">
         <p className="font-mono text-xs uppercase tracking-wider text-[var(--text-tertiary)]">
           MedRAG
         </p>

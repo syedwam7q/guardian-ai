@@ -10,7 +10,7 @@ import {
   Sparkles,
   type LucideIcon,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -105,13 +105,29 @@ export function EventFeed({
         </Button>
       </div>
       <ScrollArea className="h-[520px]">
-        <ul className="flex flex-col">
-          <AnimatePresence initial={false}>
-            {events.map((ev) => (
-              <EventRow key={ev.id} event={ev} onSelect={onSelect} />
-            ))}
-          </AnimatePresence>
-        </ul>
+        {events.length === 0 ? (
+          <div className="flex flex-col items-center justify-center px-6 py-16 text-center">
+            <Eye
+              className="mb-3 h-8 w-8 text-[var(--text-tertiary)]"
+              aria-hidden="true"
+            />
+            <p className="font-display text-base text-[var(--text-primary)]">
+              No events match these filters
+            </p>
+            <p className="mt-1 max-w-sm text-sm text-[var(--text-secondary)]">
+              Try widening your time window or removing an agent / severity
+              filter.
+            </p>
+          </div>
+        ) : (
+          <ul className="flex flex-col">
+            <AnimatePresence initial={false}>
+              {events.map((ev) => (
+                <EventRow key={ev.id} event={ev} onSelect={onSelect} />
+              ))}
+            </AnimatePresence>
+          </ul>
+        )}
       </ScrollArea>
     </div>
   );
@@ -122,7 +138,7 @@ interface EventRowProps {
   onSelect: (event: GovEvent) => void;
 }
 
-function EventRow({ event, onSelect }: EventRowProps) {
+const EventRow = memo(function EventRow({ event, onSelect }: EventRowProps) {
   const Icon = AGENT_ICON[event.agent];
   const ago = useMemo(() => timeAgo(event.timestamp), [event.timestamp]);
   return (
@@ -136,9 +152,11 @@ function EventRow({ event, onSelect }: EventRowProps) {
       <button
         type="button"
         onClick={() => onSelect(event)}
+        aria-label={`Open trace for ${event.agent} verdict ${event.severity}`}
         className={cn(
           "grid w-full grid-cols-[64px_140px_60px_1fr_120px] items-center gap-3 border-b border-border-subtle/60 px-5 py-3 text-left transition-colors",
           "hover:border-l-2 hover:border-l-signal-causal hover:bg-bg-elevated/50",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-signal-causal",
         )}
       >
         <Badge variant={SEVERITY_VARIANT[event.severity]}>{event.severity}</Badge>
@@ -158,4 +176,4 @@ function EventRow({ event, onSelect }: EventRowProps) {
       </button>
     </motion.li>
   );
-}
+});

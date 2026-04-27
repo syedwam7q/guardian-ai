@@ -1,12 +1,27 @@
 import { useCallback, useState } from "react";
 
+export type AgentSeverityRaw = "SAFE" | "WATCH" | "WARN" | "BLOCK";
+
+export interface VerdictPayload {
+  agent: string | { value?: string };
+  severity?: AgentSeverityRaw | string;
+  confidence?: number;
+  latency_ms?: number;
+  rationale?: string;
+}
+
+export interface DecisionPayload {
+  action?: string;
+  rationale?: string;
+}
+
 export type SSEEvent =
   | { event: "trace"; data: { trace_id: string } }
   | { event: "retrieval"; data: { doc_ids: string[]; scores: number[] } }
   | { event: "token"; data: string }
-  | { event: "blocked"; data: { verdicts: unknown[] } }
-  | { event: "verdicts"; data: unknown[] }
-  | { event: "decision"; data: unknown }
+  | { event: "blocked"; data: { verdicts: VerdictPayload[] } }
+  | { event: "verdicts"; data: VerdictPayload[] }
+  | { event: "decision"; data: DecisionPayload }
   | { event: "error"; data: { message: string } }
   | { event: "done"; data: "" };
 

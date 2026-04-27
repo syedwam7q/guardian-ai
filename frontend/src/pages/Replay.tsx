@@ -7,15 +7,17 @@ import {
   type ReplayDot,
 } from "@/components/replay/TimelineScrubber";
 import { Skeleton } from "@/components/ui/skeleton";
+import { usePageTitle } from "@/hooks/usePageTitle";
 import { REPLAY_DECISIONS } from "@/lib/mockReplay";
 
 export default function Replay() {
+  usePageTitle("Decision Replay");
   const [index, setIndex] = useState(REPLAY_DECISIONS.length - 1);
   const [range, setRange] = useState<"24h" | "7d" | "30d">("24h");
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    const id = window.setTimeout(() => setMounted(true), 300);
+    const id = window.setTimeout(() => setMounted(true), 250);
     return () => window.clearTimeout(id);
   }, []);
 
@@ -32,7 +34,7 @@ export default function Replay() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <header className="border-b border-border-subtle bg-bg-surface px-8 py-5">
+      <header className="border-b border-border-subtle bg-bg-surface px-6 py-5 sm:px-8">
         <p className="font-mono text-xs uppercase tracking-wider text-[var(--text-tertiary)]">
           Audit
         </p>
@@ -45,7 +47,7 @@ export default function Replay() {
         </p>
       </header>
 
-      <div className="flex-1 space-y-6 overflow-y-auto p-8">
+      <div className="flex-1 space-y-6 overflow-y-auto p-6 sm:p-8">
         {!mounted ? (
           <ReplaySkeleton />
         ) : (
@@ -80,11 +82,22 @@ export default function Replay() {
 
 function ReplaySkeleton() {
   return (
-    <div className="space-y-6">
-      <Skeleton className="h-24 w-full" />
+    <div className="space-y-6" aria-hidden="true">
+      <div className="space-y-3 rounded-lg border border-border-subtle bg-bg-surface p-5">
+        <Skeleton className="h-5 w-40" />
+        <Skeleton className="h-12 w-full" />
+      </div>
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        <Skeleton className="h-96 w-full lg:col-span-2" />
-        <Skeleton className="h-96 w-full lg:col-span-1" />
+        <div className="space-y-3 rounded-lg border border-border-subtle bg-bg-surface p-5 lg:col-span-2">
+          <Skeleton className="h-5 w-48" />
+          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-3/4" />
+          <Skeleton className="h-32 w-full" />
+        </div>
+        <div className="space-y-3 rounded-lg border border-border-subtle bg-bg-surface p-5 lg:col-span-1">
+          <Skeleton className="h-5 w-40" />
+          <Skeleton className="h-32 w-full" />
+        </div>
       </div>
     </div>
   );
