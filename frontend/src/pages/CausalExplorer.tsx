@@ -1,10 +1,12 @@
 import { Download, FileJson } from "lucide-react";
-import { Suspense, lazy, useState } from "react";
+import { Suspense, lazy, useEffect, useState } from "react";
+import { motion } from "framer-motion";
 import { toast } from "sonner";
 import { CausalGraph2D } from "@/components/causal/CausalGraph2D";
 import { CounterfactualPlayground } from "@/components/causal/CounterfactualPlayground";
 import { RankedCausesList } from "@/components/causal/RankedCausesList";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { RANKED_CAUSES } from "@/lib/mockDag";
 import { cn } from "@/lib/utils";
 
@@ -19,6 +21,12 @@ type Mode = "2d" | "3d";
 export default function CausalExplorer() {
   const [mode, setMode] = useState<Mode>("2d");
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    const id = window.setTimeout(() => setMounted(true), 300);
+    return () => window.clearTimeout(id);
+  }, []);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -58,65 +66,87 @@ export default function CausalExplorer() {
       </header>
 
       <div className="flex-1 overflow-y-auto p-8">
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-          <div className="relative h-[560px] rounded-lg border border-border-subtle bg-bg-surface p-1 lg:col-span-2">
-            {mode === "2d" ? (
-              <CausalGraph2D onSelectNode={setSelectedNode} />
-            ) : (
-              <Suspense
-                fallback={
-                  <div className="flex h-full items-center justify-center font-mono text-xs text-[var(--text-tertiary)]">
-                    Loading 3D scene…
+        {!mounted ? (
+          <CausalSkeleton />
+        ) : (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.25 }}
+          >
+            <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+              <div className="relative h-[560px] rounded-lg border border-border-subtle bg-bg-surface p-1 lg:col-span-2">
+                {mode === "2d" ? (
+                  <CausalGraph2D onSelectNode={setSelectedNode} />
+                ) : (
+                  <Suspense
+                    fallback={
+                      <div className="flex h-full items-center justify-center font-mono text-xs text-[var(--text-tertiary)]">
+                        Loading 3D scene…
+                      </div>
+                    }
+                  >
+                    <CausalGraph3D />
+                  </Suspense>
+                )}
+                {selectedNode && (
+                  <div className="pointer-events-none absolute bottom-4 left-4 rounded-md border border-signal-causal/40 bg-bg-deep/90 px-3 py-2 font-mono text-xs text-signal-causal backdrop-blur">
+                    selected · {selectedNode}
                   </div>
-                }
-              >
-                <CausalGraph3D />
-              </Suspense>
-            )}
-            {selectedNode && (
-              <div className="pointer-events-none absolute bottom-4 left-4 rounded-md border border-signal-causal/40 bg-bg-deep/90 px-3 py-2 font-mono text-xs text-signal-causal backdrop-blur">
-                selected · {selectedNode}
+                )}
               </div>
-            )}
-          </div>
 
-          <div className="space-y-6 lg:col-span-1">
-            <div className="rounded-lg border border-border-subtle bg-bg-surface p-5">
-              <h3 className="mb-3 font-display text-base text-[var(--text-primary)]">
-                Ranked actual causes
-              </h3>
-              <RankedCausesList
-                causes={RANKED_CAUSES}
-                onWhatIf={(node) =>
-                  toast.info(`Open the playground below to vary ${node}.`)
-                }
-              />
+              <div className="space-y-6 lg:col-span-1">
+                <div className="rounded-lg border border-border-subtle bg-bg-surface p-5">
+                  <h3 className="mb-3 font-display text-base text-[var(--text-primary)]">
+                    Ranked actual causes
+                  </h3>
+                  <RankedCausesList
+                    causes={RANKED_CAUSES}
+                    onWhatIf={(node) =>
+                      toast.info(`Open the playground below to vary ${node}.`)
+                    }
+                  />
+                </div>
+
+                <CounterfactualPlayground />
+              </div>
             </div>
 
-            <CounterfactualPlayground />
-          </div>
-        </div>
+            <div className="mt-6 flex items-center justify-end gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => toast.success("Export queued (PNG)")}
+                className="gap-2"
+              >
+                <Download className="h-3.5 w-3.5" aria-hidden />
+                Export PNG
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => toast.success("Export queued (JSON)")}
+                className="gap-2"
+              >
+                <FileJson className="h-3.5 w-3.5" aria-hidden />
+                Export JSON
+              </Button>
+            </div>
+          </motion.div>
+        )}
+      </div>
+    </div>
+  );
+}
 
-        <div className="mt-6 flex items-center justify-end gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => toast.success("Export queued (PNG)")}
-            className="gap-2"
-          >
-            <Download className="h-3.5 w-3.5" aria-hidden />
-            Export PNG
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => toast.success("Export queued (JSON)")}
-            className="gap-2"
-          >
-            <FileJson className="h-3.5 w-3.5" aria-hidden />
-            Export JSON
-          </Button>
-        </div>
+function CausalSkeleton() {
+  return (
+    <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+      <Skeleton className="h-[560px] w-full lg:col-span-2" />
+      <div className="space-y-6 lg:col-span-1">
+        <Skeleton className="h-64 w-full" />
+        <Skeleton className="h-64 w-full" />
       </div>
     </div>
   );

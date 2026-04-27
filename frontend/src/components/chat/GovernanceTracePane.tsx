@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import { Check, Copy } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -106,16 +107,34 @@ export function GovernanceTracePane({
     return ev ? ((ev.data as DecisionShape) ?? null) : null;
   }, [events]);
 
-  function rowFor(key: string, label: string) {
+  function rowFor(key: string, label: string, index: number) {
     const v = verdictsByAgent.get(key);
+    const severity = v ? normalizeSeverity(v.severity) : "pending";
+    const phaseKey = severity === "pending" ? "pending" : "filled";
     return (
-      <AgentVerdictRow
+      <motion.div
         key={key}
-        agent={label}
-        severity={v ? normalizeSeverity(v.severity) : "pending"}
-        confidence={v?.confidence}
-        latency_ms={v?.latency_ms}
-      />
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.25, delay: index * 0.04 }}
+      >
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.div
+            key={phaseKey}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+          >
+            <AgentVerdictRow
+              agent={label}
+              severity={severity}
+              confidence={v?.confidence}
+              latency_ms={v?.latency_ms}
+            />
+          </motion.div>
+        </AnimatePresence>
+      </motion.div>
     );
   }
 
@@ -171,7 +190,7 @@ export function GovernanceTracePane({
               Pre-flight
             </h4>
             <div className="space-y-1.5">
-              {PRE_FLIGHT_AGENTS.map((a) => rowFor(a.key, a.label))}
+              {PRE_FLIGHT_AGENTS.map((a, i) => rowFor(a.key, a.label, i))}
             </div>
           </section>
 
@@ -182,7 +201,7 @@ export function GovernanceTracePane({
               Post-flight
             </h4>
             <div className="space-y-1.5">
-              {POST_FLIGHT_AGENTS.map((a) => rowFor(a.key, a.label))}
+              {POST_FLIGHT_AGENTS.map((a, i) => rowFor(a.key, a.label, i))}
             </div>
           </section>
 

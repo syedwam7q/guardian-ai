@@ -1,4 +1,4 @@
-import { Fragment } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 
 interface MessageBubbleProps {
@@ -6,6 +6,7 @@ interface MessageBubbleProps {
   content: string;
   streaming?: boolean;
   onCitationClick?: (n: number) => void;
+  activeCitation?: number | null;
 }
 
 const CITATION_SPLIT_RE = /(\[\d+\])/g;
@@ -16,6 +17,7 @@ export function MessageBubble({
   content,
   streaming = false,
   onCitationClick,
+  activeCitation = null,
 }: MessageBubbleProps) {
   const isUser = role === "user";
   const isBlocked = role === "blocked";
@@ -40,7 +42,7 @@ export function MessageBubble({
           </p>
         )}
         <div className="whitespace-pre-wrap break-words">
-          {renderContentWithCitations(content, onCitationClick)}
+          {renderContentWithCitations(content, onCitationClick, activeCitation)}
           {streaming && (
             <span
               aria-hidden
@@ -56,6 +58,7 @@ export function MessageBubble({
 function renderContentWithCitations(
   content: string,
   onCitationClick?: (n: number) => void,
+  activeCitation: number | null = null,
 ) {
   const parts = content.split(CITATION_SPLIT_RE);
   return parts.map((part, idx) => {
@@ -63,16 +66,54 @@ function renderContentWithCitations(
     if (matched) {
       const n = Number(matched[1]);
       return (
-        <button
+        <CitationBadge
           key={idx}
-          type="button"
-          onClick={() => onCitationClick?.(n)}
-          className="mx-0.5 inline-flex h-5 items-center rounded border border-signal-causal/30 bg-signal-causal/15 px-1.5 align-baseline font-mono text-[11px] text-signal-causal transition-colors hover:bg-signal-causal/25 focus:outline-none focus-visible:ring-2 focus-visible:ring-signal-causal"
-        >
-          [{n}]
-        </button>
+          n={n}
+          active={activeCitation === n}
+          onClick={onCitationClick}
+        />
       );
     }
     return <Fragment key={idx}>{part}</Fragment>;
   });
+}
+
+interface CitationBadgeProps {
+  n: number;
+  active: boolean;
+  onClick?: (n: number) => void;
+}
+
+function CitationBadge({ n, active, onClick }: CitationBadgeProps) {
+  const [pulse, setPulse] = useState(false);
+  const initial = useRef(true);
+
+  useEffect(() => {
+    if (initial.current) {
+      initial.current = false;
+      return;
+    }
+    if (!active) return;
+    setPulse(true);
+    const id = window.setTimeout(() => setPulse(false), 350);
+    return () => window.clearTimeout(id);
+  }, [active]);
+
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      onClick={() => onClick?.(n)}
+      className={cn(
+        "mx-0.5 inline-flex items-center rounded-md px-1.5 py-0.5 align-baseline font-mono text-xs",
+        "bg-signal-causal/20 text-signal-causal",
+        "transition-transform hover:scale-110 hover:bg-signal-causal/30",
+        "focus:outline-none focus-visible:ring-2 focus-visible:ring-signal-causal",
+        active && "ring-1 ring-signal-causal/60 bg-signal-causal/30",
+        pulse && "scale-110",
+      )}
+    >
+      <sup className="leading-none">{n}</sup>
+    </button>
+  );
 }

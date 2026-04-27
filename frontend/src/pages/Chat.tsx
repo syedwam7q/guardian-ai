@@ -141,6 +141,7 @@ export default function Chat() {
           error={error}
           onSubmit={handleSubmit}
           onCitationClick={(n) => setSelectedCitation(n)}
+          activeCitation={selectedCitation}
         />
         <GovernanceTracePane events={events} loading={loading} />
       </div>

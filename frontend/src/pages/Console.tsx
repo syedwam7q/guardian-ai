@@ -1,9 +1,11 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
+import { motion } from "framer-motion";
 import { EventDrawer } from "@/components/console/EventDrawer";
 import { EventFeed } from "@/components/console/EventFeed";
 import { EventTicker } from "@/components/console/EventTicker";
 import { FilterPanel } from "@/components/console/FilterPanel";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   generateMockEvents,
   type AgentName,
@@ -18,6 +20,12 @@ export default function Console() {
   const [events, setEvents] = useState<GovEvent[]>(INITIAL_EVENTS);
   const [liveMode, setLiveMode] = useState(false);
   const [selected, setSelected] = useState<GovEvent | null>(null);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    const id = window.setTimeout(() => setMounted(true), 300);
+    return () => window.clearTimeout(id);
+  }, []);
 
   const filtered = useMemo(() => {
     const agents = (params.get("agents") ?? "")
@@ -61,14 +69,25 @@ export default function Console() {
       </header>
 
       <div className="flex-1 space-y-6 overflow-y-auto p-8">
-        <EventTicker />
-        <EventFeed
-          events={filtered}
-          liveMode={liveMode}
-          onToggleLive={() => setLiveMode((v) => !v)}
-          onSelect={setSelected}
-          onPrependEvents={onPrependEvents}
-        />
+        {!mounted ? (
+          <ConsoleSkeleton />
+        ) : (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.25 }}
+            className="space-y-6"
+          >
+            <EventTicker />
+            <EventFeed
+              events={filtered}
+              liveMode={liveMode}
+              onToggleLive={() => setLiveMode((v) => !v)}
+              onSelect={setSelected}
+              onPrependEvents={onPrependEvents}
+            />
+          </motion.div>
+        )}
       </div>
 
       <EventDrawer
@@ -77,6 +96,20 @@ export default function Console() {
           if (!open) setSelected(null);
         }}
       />
+    </div>
+  );
+}
+
+function ConsoleSkeleton() {
+  return (
+    <div className="space-y-6">
+      <Skeleton className="h-20 w-full" />
+      <div className="space-y-2">
+        <Skeleton className="h-10 w-full" />
+        {Array.from({ length: 8 }).map((_, i) => (
+          <Skeleton key={i} className="h-14 w-full" />
+        ))}
+      </div>
     </div>
   );
 }

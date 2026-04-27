@@ -1,15 +1,23 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { motion } from "framer-motion";
 import { AlternativeActionSlider } from "@/components/replay/AlternativeActionSlider";
 import { DecisionDetailCard } from "@/components/replay/DecisionDetailCard";
 import {
   TimelineScrubber,
   type ReplayDot,
 } from "@/components/replay/TimelineScrubber";
+import { Skeleton } from "@/components/ui/skeleton";
 import { REPLAY_DECISIONS } from "@/lib/mockReplay";
 
 export default function Replay() {
   const [index, setIndex] = useState(REPLAY_DECISIONS.length - 1);
   const [range, setRange] = useState<"24h" | "7d" | "30d">("24h");
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    const id = window.setTimeout(() => setMounted(true), 300);
+    return () => window.clearTimeout(id);
+  }, []);
 
   const dots: ReplayDot[] = useMemo(() => {
     const n = REPLAY_DECISIONS.length;
@@ -38,22 +46,45 @@ export default function Replay() {
       </header>
 
       <div className="flex-1 space-y-6 overflow-y-auto p-8">
-        <TimelineScrubber
-          dots={dots}
-          index={index}
-          onScrub={setIndex}
-          range={range}
-          onRangeChange={setRange}
-        />
+        {!mounted ? (
+          <ReplaySkeleton />
+        ) : (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.25 }}
+            className="space-y-6"
+          >
+            <TimelineScrubber
+              dots={dots}
+              index={index}
+              onScrub={setIndex}
+              range={range}
+              onRangeChange={setRange}
+            />
 
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-          <div className="lg:col-span-2">
-            <DecisionDetailCard decision={decision} />
-          </div>
-          <div className="lg:col-span-1">
-            <AlternativeActionSlider decision={decision} />
-          </div>
-        </div>
+            <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+              <div className="lg:col-span-2">
+                <DecisionDetailCard decision={decision} />
+              </div>
+              <div className="lg:col-span-1">
+                <AlternativeActionSlider decision={decision} />
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ReplaySkeleton() {
+  return (
+    <div className="space-y-6">
+      <Skeleton className="h-24 w-full" />
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+        <Skeleton className="h-96 w-full lg:col-span-2" />
+        <Skeleton className="h-96 w-full lg:col-span-1" />
       </div>
     </div>
   );

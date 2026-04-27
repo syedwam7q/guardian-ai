@@ -22,6 +22,7 @@ interface ConversationPaneProps {
   error: string | null;
   onSubmit: (text: string) => void;
   onCitationClick: (n: number) => void;
+  activeCitation?: number | null;
 }
 
 const formSchema = z.object({
@@ -36,6 +37,7 @@ export function ConversationPane({
   error,
   onSubmit,
   onCitationClick,
+  activeCitation = null,
 }: ConversationPaneProps) {
   const {
     register,
@@ -92,6 +94,7 @@ export function ConversationPane({
               role={m.role}
               content={m.content}
               onCitationClick={onCitationClick}
+              activeCitation={activeCitation}
             />
           ))}
           {liveAssistant && (
@@ -100,6 +103,7 @@ export function ConversationPane({
               content={liveAssistant.content}
               streaming={loading && liveAssistant.role === "assistant"}
               onCitationClick={onCitationClick}
+              activeCitation={activeCitation}
             />
           )}
           {error && (

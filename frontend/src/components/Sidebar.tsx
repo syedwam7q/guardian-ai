@@ -1,5 +1,6 @@
 import { ChevronLeft, ChevronRight, Settings } from "lucide-react";
 import { NavLink } from "react-router-dom";
+import { Logo } from "@/components/Logo";
 import { cn } from "@/lib/utils";
 import { navItems } from "@/lib/nav";
 import { useUIStore } from "@/lib/store";
@@ -16,8 +17,8 @@ export function Sidebar() {
       )}
     >
       <div className="flex h-14 items-center gap-3 border-b border-border-subtle px-4">
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-signal-causal/15 text-signal-causal font-display text-lg">
-          G
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-signal-causal/15 text-signal-causal">
+          <Logo size={18} />
         </div>
         {!collapsed && (
           <span className="font-display text-base text-[var(--text-primary)]">
