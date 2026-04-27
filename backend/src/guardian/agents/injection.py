@@ -22,6 +22,7 @@ _INJECTION_PATTERNS = [
     r"\byou\s+are\s+now\s+(DAN|developer mode|unrestricted)",
     r"\b(forget|abandon)\b.{0,40}\b(rules?|guidelines?|safety)\b",
     r"override\b.{0,40}\b(prior|previous|context|system)\b",
+    r"\b(reveal|show|tell|print|output|extract|leak)\b.{0,30}\bsystem\s*prompt\b",
 ]
 _COMPILED = [re.compile(p, re.IGNORECASE | re.DOTALL) for p in _INJECTION_PATTERNS]
 
