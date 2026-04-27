@@ -1,0 +1,47 @@
+domain: medical
+rules:
+  - id: emergency_redirect
+    description: "Redirect emergency / suicidal queries to crisis resources before answering"
+    triggers:
+      any_of:
+        - regex: "\\b(suicid(e|al)|kill myself|harm myself|end my life)\\b"
+        - regex: "\\b(chest pain|stroke|cardiac arrest|can't breathe|unconscious)\\b"
+    action: add_disclaimer
+    severity: warn
+    disclaimer: |
+      ⚠️ This sounds like a medical emergency. Please call your local emergency number
+      (in India: 112) or visit the nearest hospital immediately. AI assistants cannot
+      replace urgent medical care.
+
+  - id: dosage_disclaimer
+    description: "Require disclaimer for dosage queries"
+    triggers:
+      any_of:
+        - regex: "\\b(dose|dosage|how much|how many mg|frequency|interval)\\b"
+    action: add_disclaimer
+    severity: watch
+    disclaimer: |
+      Note: Dosing information is for educational reference only. Always consult a
+      qualified healthcare professional before taking, changing, or stopping any medication.
+
+  - id: diagnosis_block
+    description: "Block direct diagnostic claims"
+    triggers:
+      all_of:
+        - regex: "\\b(do I have|do i have|am I (suffering|having)|diagnose me|what disease)\\b"
+    action: add_disclaimer
+    severity: warn
+    disclaimer: |
+      I'm not able to diagnose conditions. The information below is general medical
+      knowledge — please see a clinician for personal evaluation.
+
+  - id: prescription_block
+    description: "Refuse explicit prescription requests"
+    triggers:
+      any_of:
+        - regex: "\\b(prescribe|write me a (script|prescription)|give me (antibiotics|opioids))\\b"
+    action: block
+    severity: block
+    refusal: |
+      I cannot prescribe medications. Prescriptions require a licensed clinician who
+      has examined you. Please consult a doctor.
