@@ -18,6 +18,8 @@ jobs:
           cache: pip
       - name: Install
         run: pip install -e ".[dev]"
+      - name: Download spaCy model (needed for Presidio/PII agents from Phase 1)
+        run: python -m spacy download en_core_web_lg
       - name: Lint
         run: ruff check src tests
       - name: Test

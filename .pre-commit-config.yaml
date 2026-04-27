@@ -15,12 +15,13 @@ repos:
       - id: check-yaml
       - id: check-toml
       - id: check-added-large-files
-        args: [--maxkb=2048]
+        args: [--maxkb=1024]
   - repo: local
     hooks:
       - id: prettier-frontend
         name: prettier-frontend
-        entry: bash -c 'cd frontend && npx --no-install prettier --write --ignore-unknown'
+        # Requires `cd frontend && npm install` first; gracefully skips if unavailable.
+        entry: bash -c 'if [ -x frontend/node_modules/.bin/prettier ]; then cd frontend && ./node_modules/.bin/prettier --write --ignore-unknown "$@"; else echo "skip: run cd frontend && npm install"; fi'
         language: system
         files: ^frontend/src/.*\.(ts|tsx|css|json)$
         pass_filenames: true
