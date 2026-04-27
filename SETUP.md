@@ -514,9 +514,11 @@ git tag phase-2-complete   # → 9c9652f (after Task 2.9)
 git tag phase-3-complete   # → 6bb5218 (after Task 3.7)
 git tag phase-4-complete   # → 3e9f125 (after Task 4.11)
 git tag phase-5-complete   # → 8b6fda4 (after Task 5.6)
+git tag phase-6-complete   # → 48faae6 (after Task 6.7)
+git tag phase-7-complete   # → a3f8baa (after Task 7.7)
+git tag phase-8-complete   # → d458529 (after Task 8.7)
+git tag phase-9-complete   # → 85cdca6 (after Task 9.6)
 ```
-
-Phase 6+ will follow the same pattern.
 
 ### 10.6 Using the GuardianAI Python SDK
 
@@ -664,9 +666,10 @@ guardian-ai/
 | Phase 3 | MedRAG demo (corpus, retrieval, streaming chat, sessions, feedback) | `phase-3-complete` | 81 cumulative | 94% on `medrag/` |
 | Phase 4 | Frontend (8 pages + foundation; mock data for 6 admin pages, live SSE on chat) | `phase-4-complete` | 81 (frontend untested) | – (Storybook + Playwright deferred) |
 | Phase 5 | Python SDK (decorator + Session + embedded/remote backends) | `phase-5-complete` | 89 cumulative | 91% on `sdk/` |
-| Phase 6 | OpenAI-compatible HTTP proxy | upcoming | – | – |
-| Phase 7 | Evaluation harness (full benchmarks + paper figures) | upcoming | – | – |
-| Phase 8 | Paper writing (LaTeX) | upcoming | – | – |
+| Phase 6 | OpenAI-compatible HTTP proxy (`/v1/chat/completions` + multi-provider routing + streaming) | `phase-6-complete` | 94 cumulative | 93% on `proxy/` |
+| Phase 7 | Evaluation harness (7 dataset adapters + RCA + latency + ablation + one-command runner) | `phase-7-complete` | 118 cumulative | 83% on `eval/` |
+| Phase 8 | Paper writing (LaTeX manuscript + 39-entry bibliography + 5 results tables) | `phase-8-complete` | 118 | – |
+| Phase 9 | Polish + Docker + Deployment + Viva prep | `phase-9-complete` | 118 | – |
 
 The acceptance criteria + commits per task are documented inline in `docs/superpowers/plans/2026-04-27-guardianai-implementation.md`.
 
